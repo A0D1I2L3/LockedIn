@@ -117,33 +117,12 @@ function renderAuthUI() {
       : "Not connected yet.";
   }
   $("#disconnect-btn").classList.toggle("hidden", !connected);
-  renderGoogleButton();
 }
 
 /* ---------------------------------------------------------------- oauth */
 
-function renderGoogleButton() {
-  const st = state.status;
-  if (!st || !st.oauth_configured || !window.google) return;
-  const clientId = st.client_id;
-  if (!clientId) return;
-  // GIS "Sign in with Google" via server-side flow.
-  window.google.accounts.id.initialize({
-    client_id: clientId,
-    ux_mode: "redirect",
-    login_uri: st.base_url + "/oauth/callback",
-    callback: (resp) => {
-      // With ux_mode=redirect, Google POSTs the credential to login_uri;
-      // callback is not used for the code flow but we keep it for safety.
-      if (resp && resp.code) {
-        window.location.href = "/oauth/callback?code=" + encodeURIComponent(resp.code);
-      }
-    },
-  });
-  window.google.accounts.id.renderButton(
-    document.getElementById("google-button"),
-    { theme: "outline", size: "large", text: "continue_with", shape: "rectangular" }
-  );
+function startOAuth() {
+  window.location.href = "/oauth/login";
 }
 
 function renderBadge() {
@@ -400,7 +379,6 @@ function openSettings() {
       : (s.configured ? "Configured — click Connect Gmail below." : "Not configured. Paste your OAuth credentials below.");
   }
   load();
-  renderGoogleButton();
 }
 function closeSettings() {
   $("#settings-modal").classList.add("hidden");
@@ -428,9 +406,10 @@ async function saveSettings() {
   }
 }
 
-$("#connect-btn").addEventListener("click", () => openSettings());
+$("#connect-btn").addEventListener("click", startOAuth);
 $("#settings-btn").addEventListener("click", () => openSettings());
 $("#settings-close").addEventListener("click", closeSettings);
+$("#modal-connect-btn").addEventListener("click", startOAuth);
 $("#settings-modal").addEventListener("click", (e) => {
   if (e.target === $("#settings-modal")) closeSettings();
 });
