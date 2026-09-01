@@ -58,20 +58,32 @@ def _make_flow(state: Optional[str] = None) -> Flow:
     return flow
 
 
+_last_flow: Optional[Flow] = None
+_flow_state: Optional[str] = None
+
+
 def authorization_url(state: str) -> str:
     """URL to send the browser to for the consent screen."""
+    global _last_flow, _flow_state
     flow = _make_flow(state)
     url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
     )
+    # Keep the flow (with its PKCE code_verifier and state) so the redirect
+    # back can reuse the very same flow to exchange the code.
+    _last_flow = flow
+    _flow_state = state
     return url
 
 
-def exchange_code(code: str) -> dict:
+def exchange_code(code: str, state: Optional[str] = None) -> dict:
     """Exchange the authorization code for tokens plus Google profile info."""
-    flow = _make_flow()
+    global _last_flow
+    # Reuse the exact flow that built the consent URL so its PKCE
+    # code_verifier matches what Google expects.
+    flow = _last_flow if (_last_flow is not None and (state is None or state == _flow_state)) else _make_flow()
     creds = flow.fetch_token(code=code)
 
     # Resolve the authenticated user via the userinfo endpoint so we can create
@@ -91,6 +103,9 @@ def exchange_code(code: str) -> dict:
         # user id will be empty and will be treated as a best-effort. Store
         # whatever we have.
         pass
+
+    # Consume the stored flow so it can't be replayed for a later request.
+    _last_flow = None
 
     return {
         "google_user_id": google_user_id,

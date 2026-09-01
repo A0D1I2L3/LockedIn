@@ -115,7 +115,8 @@ def create_app() -> FastAPI:
 
         db = get_db()
         try:
-            result = oauth.exchange_code(code)
+            state = request.query_params.get("state") or getattr(app.state, "_last_oauth_state", None)
+            result = oauth.exchange_code(code, state)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Could not complete sign-in: {exc}")
 
