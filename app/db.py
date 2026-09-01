@@ -155,6 +155,11 @@ class Database:
             ).fetchone()
         return dict(row) if row else None
 
+    def all_user_ids(self) -> list[int]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT id FROM users").fetchall()
+        return [r["id"] for r in rows]
+
     def delete_user(self, user_id: int) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM oauth_tokens WHERE user_id = ?", (user_id,))

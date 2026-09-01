@@ -31,7 +31,7 @@ class Settings:
 
     def __init__(self) -> None:
         self.base_dir: Path = BASE_DIR
-        self.data_dir: Path = BASE_DIR / "data"
+        self.data_dir: Path = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
         self.db_path: Path = Path(os.getenv("DB_PATH", self.data_dir / "dashboard.db"))
         self.token_path: Path = Path(
             os.getenv("TOKEN_FILE", self.data_dir / "token.json")

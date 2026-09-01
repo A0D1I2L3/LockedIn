@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.config import settings
 from app.db import Database
-from app.models import EmailMessage, STAGE_OFFER, STAGE_REJECTION
+from app.models import EmailMessage, STAGE_REJECTION
 from app.pipeline import sync
 
 
@@ -12,14 +12,14 @@ class FakeClient:
     def __init__(self, messages):
         self._messages = messages  # list of raw email kwargs
 
-    def list_messages(self, query):
+    def list_message_ids(self, query):
         for i, m in enumerate(self._messages):
-            yield {"id": f"msg-{i}"}
+            yield f"msg-{i}"
 
     def fetch_metadata(self, message_id):
         i = int(message_id.split("-")[1])
         m = self._messages[i]
-        email = EmailMessage(
+        return EmailMessage(
             id=message_id,
             thread_id=m.get("thread", f"t{i}"),
             subject=m["subject"],
@@ -30,12 +30,16 @@ class FakeClient:
             snippet=m.get("snippet", ""),
             labels=m.get("labels", []),
         )
-        return email
+
+
+def _user(db) -> int:
+    return db.get_or_create_user("u-test", "tester@example.com")
 
 
 def test_sync_pipes_messages(tmp_path):
     settings.data_dir.mkdir(parents=True, exist_ok=True)  # ensure safe default
     db = Database(tmp_path / "t.db")
+    uid = _user(db)
     client = FakeClient(
         [
             {
@@ -51,10 +55,10 @@ def test_sync_pipes_messages(tmp_path):
         ]
     )
 
-    result = sync(client, db, max_messages=10)
+    result = sync(client, db, uid, max_messages=10)
     assert result.saved == 2
 
-    messages = db.get_messages()
+    messages = db.get_messages(uid)
     by_company = {m["company"]: m for m in messages}
     assert by_company["Jane Street"]["stage"] == "application"
     assert by_company["Beta"]["stage"] == STAGE_REJECTION
@@ -65,6 +69,7 @@ def test_sync_pipes_messages(tmp_path):
 
 def test_sync_flag_on_schedule_ask(tmp_path):
     db = Database(tmp_path / "t.db")
+    uid = _user(db)
     client = FakeClient(
         [
             {
@@ -83,10 +88,10 @@ def test_sync_flag_on_schedule_ask(tmp_path):
             },
         ]
     )
-    result = sync(client, db, max_messages=10)
+    result = sync(client, db, uid, max_messages=10)
     assert result.saved == 2
 
-    messages = {m["id"]: m for m in db.get_messages()}
+    messages = {m["id"]: m for m in db.get_messages(uid)}
     # Only the newest message in a thread may carry the flag.
     flagged = [m for m in messages.values() if m["needs_action"]]
     assert len(flagged) == 1
