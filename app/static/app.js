@@ -134,7 +134,10 @@ function renderBadge() {
     badge.classList.remove("hidden", "spinning");
     badge.classList.add("spinning");
   } else if (state.status.last_completed_sync) {
-    badge.textContent = `updated ${state.status.last_completed_sync}`;
+    const r = state.status.last_result || {};
+    const detail = (r.scanned ?? "")
+      ? ` | scanned ${r.scanned}, saved ${r.saved}, skipped ${r.skipped}` : "";
+    badge.textContent = `updated ${state.status.last_completed_sync}${detail}`;
     badge.classList.remove("hidden");
   } else {
     badge.classList.add("hidden");

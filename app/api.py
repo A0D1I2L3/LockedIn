@@ -227,6 +227,7 @@ def create_app() -> FastAPI:
                 "last_error": sync.get("last_error"),
             },
             "last_completed_sync": db.get_meta(f"last_sync_{user_id}") if user_id else None,
+            "last_result": sync.get("last_result"),
             "message_count": message_count,
         }
 
