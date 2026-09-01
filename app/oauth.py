@@ -76,7 +76,10 @@ def authorization_url(state: str) -> str:
 def exchange_code(code: str, state: Optional[str] = None) -> dict:
     """Exchange the authorization code for tokens plus Google profile info."""
     flow = _make_flow(state)
-    creds = flow.fetch_token(code=code)
+    flow.fetch_token(code=code)
+    # fetch_token returns a raw token mapping; use flow.credentials for a
+    # full google.auth Credentials instance (access, refresh, expiry).
+    creds = flow.credentials
 
     # Resolve the authenticated user via the userinfo endpoint so we can create
     # a per-user record keyed by Google's "sub".
