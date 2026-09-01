@@ -6,6 +6,7 @@ tokens are stored (encrypted) and their sync + dashboard data are scoped to
 their own rows.
 """
 
+import logging
 import secrets
 import threading
 from pathlib import Path
@@ -22,6 +23,8 @@ from .config import settings
 from .db import Database
 from .gmail_client import GmailClient
 from .pipeline import sync
+
+logger = logging.getLogger("lockedin.sync")
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -258,9 +261,17 @@ def create_app() -> FastAPI:
                 expires_at=token.get("expires_at"),
             )
             result = sync(client, db, user_id, full=full)
+            logger.info(
+                "sync user=%s full=%s scanned=%s saved=%s updated=%s skipped=%s",
+                user_id, full, result.scanned, result.saved, result.updated, result.skipped,
+            )
             state["last_result"] = result.to_dict()
         except Exception as exc:
-            state["last_error"] = str(exc)
+            import traceback
+
+            tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            logger.warning("sync failed for user=%s:\n%s", user_id, tb)
+            state["last_error"] = tb
         finally:
             with lock:
                 state["running"] = False
