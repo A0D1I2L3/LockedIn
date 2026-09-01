@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import re
+from datetime import datetime, timezone
 from typing import Iterator, Optional
 
 from google.auth.exceptions import GoogleAuthError, RefreshError
@@ -52,9 +53,7 @@ class GmailClient:
             client_secret=client_secret,
         )
         if expires_at:
-            # Credentials.expiry is a datetime; set from epoch ms.
-            from datetime import datetime, timezone
-
+            # Credentials.expiry is a datetime; set from epoch ms (aware UTC).
             self._creds.expiry = datetime.fromtimestamp(expires_at / 1000, tz=timezone.utc)
         self._service = None
 
@@ -71,8 +70,16 @@ class GmailClient:
         try:
             if not self._creds.token:
                 return False
+            # Normalise expiry to aware UTC to avoid naive/aware comparisons
+            # inside google-auth's `expired` property / refresh flow.
+            if self._creds.expiry is not None and self._creds.expiry.tzinfo is None:
+                self._creds.expiry = self._creds.expiry.replace(tzinfo=timezone.utc)
             if self._creds.expired and self._creds.refresh_token:
                 self._creds.refresh(Request())
+                # After a refresh the library may leave expiry naive; pin it to
+                # aware UTC so subsequent `expired` checks stay consistent.
+                if self._creds.expiry is not None and self._creds.expiry.tzinfo is None:
+                    self._creds.expiry = self._creds.expiry.replace(tzinfo=timezone.utc)
             return True
         except (GoogleAuthError, RefreshError):
             return False
