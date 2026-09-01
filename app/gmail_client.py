@@ -1,45 +1,34 @@
-"""Thin wrapper around the Gmail API.
+"""Gmail API client for per-user, token-based sync.
 
-Handles credential loading/refresh from the token stored by `setup_oauth`,
-plus the two operations the dashboard needs: listing message metadata and
-fetching a full plain-text body.
-
-Scope: readonly + modify (so the app can later mark things read, add labels,
-etc. without a scope change).
+The OAuth exchange stores each user's tokens in the database (see db.auth).
+This client builds google credentials from a token dict
+{access_token, refresh_token} plus the app's OAuth client info, and uses them
+to talk to the Gmail API.
 """
 
 from __future__ import annotations
 
 import base64
 import re
-from email.utils import parseaddr
-from typing import Iterator
+from typing import Iterator, Optional
 
-from google.auth.exceptions import GoogleAuthError
+from google.auth.exceptions import GoogleAuthError, RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from .config import SCOPES, settings
+from .config import SCOPES
 from .models import EmailMessage
 
-# Body charset handling looks for these headers.
-_TEXT_PLAIN = "text/plain"
-_TEXT_HTML = "text/html"
 
-_WHITESPACE = re.compile(r"\s+")
-
-
-def _decode(body: bytes) -> str:
-    try:
-        return body.decode("utf-8", "replace")
-    except Exception:
-        return body.decode("latin-1", "replace")
+class GmailError(Exception):
+    pass
 
 
 def _from_header(value: str) -> tuple[str, str]:
-    """Return (display_name, email_address) from a From header."""
+    from email.utils import parseaddr
+
     name, addr = parseaddr((value or "").encode("ascii", "replace").decode("ascii"))
     if not name and "@" in (addr or ""):
         name = addr.split("@")[0].replace(".", " ").title()
@@ -47,47 +36,67 @@ def _from_header(value: str) -> tuple[str, str]:
 
 
 class GmailClient:
-    def __init__(self, token_path=None) -> None:
-        self.token_path = token_path or settings.token_path
+    def __init__(
+        self,
+        access_token: str,
+        refresh_token: Optional[str],
+        client_id: str,
+        client_secret: str,
+        expires_at: Optional[int] = None,
+    ) -> None:
+        self._creds = Credentials(
+            token=access_token,
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+        if expires_at:
+            # Credentials.expiry is a datetime; set from epoch ms.
+            from datetime import datetime, timezone
+
+            self._creds.expiry = datetime.fromtimestamp(expires_at / 1000, tz=timezone.utc)
         self._service = None
 
     # ------------------------------------------------------------------ auth
 
+    def user_email(self) -> str:
+        return self.service().users().getProfile(userId="me").execute().get("emailAddress", "")
+
     def has_token(self) -> bool:
+        return bool(self._creds and self._creds.token)
+
+    def is_valid(self) -> bool:
+        """True if credentials are usable, refreshing the token if needed."""
         try:
-            return self.load_credentials().valid
-        except GoogleAuthError:
+            if not self._creds.token:
+                return False
+            if self._creds.expired and self._creds.refresh_token:
+                self._creds.refresh(Request())
+            return True
+        except (GoogleAuthError, RefreshError):
             return False
 
-    def load_credentials(self) -> Credentials:
-        if not self.token_path.exists():
-            raise GoogleAuthError(
-                f"No token at {self.token_path}. Run `python bin/setup_oauth.py` "
-                "first to connect your Gmail account."
-            )
-        creds = Credentials.from_authorized_user_file(str(self.token_path), SCOPES)
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            self.token_path.write_text(creds.to_json())
-        return creds
-
-    # ---------------------------------------------------------------- service
+    def refreshed_token(self) -> Optional[dict]:
+        """After is_valid(), returns updated token info (or None)."""
+        return {
+            "access_token": self._creds.token,
+            "refresh_token": self._creds.refresh_token,
+            "expires_at": int(self._creds.expiry.timestamp() * 1000) if self._creds.expiry else None,
+        }
 
     def service(self):
         if self._service is None:
-            creds = self.load_credentials()
+            creds = self._creds
+            if creds.expired and creds.refresh_token:
+                creds.refresh(Request())
             self._service = build("gmail", "v1", credentials=creds, cache_discovery=False)
         return self._service
 
-    def user_email(self) -> str:
-        profile = self.service().users().getProfile(userId="me").execute()
-        return profile.get("emailAddress", "")
-
     # ---------------------------------------------------------------- listing
 
-    def list_messages(self, query: str) -> Iterator[dict]:
-        """Iterate over message *summary* dicts (`id` + `threadId`) matching
-        a Gmail search query."""
+    def list_message_ids(self, query: str) -> Iterator[str]:
+        """Yield Gmail message ids matching a search query."""
         service = self.service()
         page_token = None
         while True:
@@ -98,13 +107,12 @@ class GmailClient:
                 .execute()
             )
             for msg in resp.get("messages", []):
-                yield msg
+                yield msg["id"]
             page_token = resp.get("nextPageToken")
             if not page_token:
                 break
 
     def fetch_metadata(self, message_id: str) -> EmailMessage:
-        """Fetch one message's metadata + snippet as an EmailMessage."""
         raw = (
             self.service()
             .users()
@@ -117,29 +125,10 @@ class GmailClient:
             )
             .execute()
         )
-        return self._to_email(raw)
-
-    # ------------------------------------------------------------------ body
-
-    def fetch_body(self, message_id: str, max_chars: int = 6000) -> str:
-        """Return the plain-text body of a message (HTML stripped)."""
-        try:
-            raw = (
-                self.service()
-                .users()
-                .messages()
-                .get(userId="me", id=message_id, format="full")
-                .execute()
-            )
-        except HttpError as exc:
-            return f"(Could not load body: {exc.resp.status})"
-        return self._extract_body(raw, max_chars)
-
-    # ------------------------------------------------------------- parsing
-
-    @staticmethod
-    def _to_email(raw: dict) -> EmailMessage:
-        headers = {h["name"].lower(): h["value"] for h in raw.get("payload", {}).get("headers", [])}
+        headers = {
+            h["name"].lower(): h["value"]
+            for h in raw.get("payload", {}).get("headers", [])
+        }
         from_name, from_addr = _from_header(headers.get("from", ""))
         domain = (from_addr.rsplit("@", 1)[-1] if "@" in from_addr else "").lower()
         return EmailMessage(
@@ -154,8 +143,27 @@ class GmailClient:
             labels=raw.get("labelIds", []) or [],
         )
 
+    # ------------------------------------------------------------------ body
+
+    def fetch_body(self, message_id: str, max_chars: int = 6000) -> str:
+        try:
+            raw = (
+                self.service()
+                .users()
+                .messages()
+                .get(userId="me", id=message_id, format="full")
+                .execute()
+            )
+        except HttpError as exc:
+            return f"(Could not load body: {exc.resp.status})"
+        body = self._extract_body(raw)
+        body = re.sub(r"\s+", " ", body).strip()
+        if len(body) > max_chars:
+            body = body[:max_chars] + "…"
+        return body
+
     @staticmethod
-    def _extract_body(raw: dict, max_chars: int) -> str:
+    def _extract_body(raw: dict) -> str:
         parts = []
 
         def walk(node: dict) -> None:
@@ -163,29 +171,23 @@ class GmailClient:
             if node.get("parts"):
                 for p in node.get("parts", []):
                     walk(p)
-            elif node.get("body", {}).get("data") and mime in (_TEXT_PLAIN, _TEXT_HTML):
+            elif node.get("body", {}).get("data") and mime in ("text/plain", "text/html"):
                 b64 = node["body"]["data"]
-                decoded = _decode(base64.urlsafe_b64decode(b64))
-                if mime == _TEXT_HTML:
+                decoded = base64.urlsafe_b64decode(b64).decode("utf-8", "replace")
+                if mime == "text/html":
                     decoded = _strip_html(decoded)
                 if decoded.strip():
                     parts.append(decoded)
 
         walk(raw.get("payload", {}))
-        body = "\n\n".join(parts).strip()
-        body = _WHITESPACE.sub(" ", body)
-        if len(body) > max_chars:
-            body = body[:max_chars] + "…"
-        return body
+        return "\n\n".join(parts).strip()
 
 
 def _strip_html(html_text: str) -> str:
     import html as html_lib
-    import re as _re
 
-    # Remove scripts/styles, block-level tags -> newlines, inline tags -> spaces.
-    html_text = _re.sub(r"(?is)<(script|style).*?</\1>", " ", html_text)
-    html_text = _re.sub(r"(?is)<br\s*/?>", "\n", html_text)
-    html_text = _re.sub(r"(?is)</(p|div|li|tr|h[1-6]|blockquote)>", "\n", html_text)
-    html_text = _re.sub(r"(?is)<[^>]+>", " ", html_text)
+    html_text = re.sub(r"(?is)<(script|style).*?</\1>", " ", html_text)
+    html_text = re.sub(r"(?is)<br\s*/?>", "\n", html_text)
+    html_text = re.sub(r"(?is)</(p|div|li|tr|h[1-6]|blockquote)>", "\n", html_text)
+    html_text = re.sub(r"(?is)<[^>]+>", " ", html_text)
     return html_lib.unescape(html_text)

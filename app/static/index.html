@@ -18,15 +18,14 @@
   </div>
   <div class="topbar-actions">
     <span id="sync-badge" class="badge hidden"></span>
-    <button id="refresh-btn" class="btn btn-primary">⟳ Sync now</button>
+    <span id="gmail-account" class="account-chip hidden"></span>
+    <button id="refresh-btn" class="btn btn-primary hidden">⟳ Sync now</button>
+    <button id="connect-btn" class="btn btn-primary">Connect Gmail</button>
+    <button id="settings-btn" class="btn" title="Settings">⚙</button>
   </div>
 </header>
 
-<section id="auth-banner" class="banner banner-warn hidden">
-  <strong>Gmail not connected.</strong>
-  Run <code>python bin/setup_oauth.py</code> once, then start the server and hit Sync.
-</section>
-
+<section id="auth-banner" class="banner banner-warn hidden"></section>
 <section id="sync-error" class="banner banner-error hidden"></section>
 
 <main>
@@ -107,6 +106,40 @@
   </div>
 </div>
 
+<!-- settings / connect modal -->
+<div id="settings-modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>Google connection</h3>
+      <button id="settings-close" class="btn btn-ghost">✕</button>
+    </div>
+    <p class="modal-meta" id="settings-status"></p>
+
+    <section class="connect-block">
+      <div id="google-button"></div>
+      <p class="hint">Click <strong>Connect Gmail</strong> to sign in with Google. You'll be asked to allow LockedIn to read your Gmail.</p>
+    </section>
+
+    <details class="creds">
+      <summary>OAuth client credentials (one-time setup)</summary>
+      <p class="hint">Create a <em>Web application</em> OAuth client in the <a href="https://console.cloud.google.com" target="_blank" rel="noopener">Google Cloud Console</a>, add this redirect URI, and paste the values below.</p>
+      <code class="creds-redirect" id="creds-redirect"></code>
+      <label>Client ID
+        <input id="cfg-client-id" type="text" placeholder="xxxxxxxx.apps.googleusercontent.com" />
+      </label>
+      <label>Client Secret
+        <input id="cfg-client-secret" type="password" placeholder="GOCSPX-…" />
+      </label>
+      <button id="cfg-save" class="btn btn-primary">Save credentials</button>
+    </details>
+
+    <div class="connect-actions">
+      <button id="disconnect-btn" class="btn btn-danger hidden">Disconnect Gmail</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

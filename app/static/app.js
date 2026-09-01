@@ -74,9 +74,76 @@ function renderAll() {
 async function loadStatus() {
   const st = await api("/api/status");
   state.status = st;
-  const auth = $("#auth-banner");
-  auth.classList.toggle("hidden", st.auth);
+  renderAuthUI();
   return st;
+}
+
+function renderAuthUI() {
+  const st = state.status;
+  if (!st) return;
+
+  const connected = !!st.auth;
+  // Top bar shows either "Sync now" (connected) or "Connect Gmail".
+  $("#refresh-btn").classList.toggle("hidden", !connected);
+  $("#connect-btn").classList.toggle("hidden", connected);
+
+  // Account chip
+  const chip = $("#gmail-account");
+  if (connected && st.email) {
+    chip.textContent = st.email;
+    chip.classList.remove("hidden");
+  } else {
+    chip.classList.add("hidden");
+  }
+
+  // Banner
+  const banner = $("#auth-banner");
+  if (connected) {
+    banner.classList.add("hidden");
+  } else if (!st.oauth_configured) {
+    banner.innerHTML =
+      "<strong>Set up Google sign-in.</strong> Open <strong>⚙ Settings</strong> and paste your OAuth Client ID + Secret (see README).";
+    banner.classList.remove("hidden");
+  } else {
+    banner.innerHTML =
+      "<strong>Gmail not connected.</strong> Click <strong>Connect Gmail</strong> to sign in with Google.";
+    banner.classList.remove("hidden");
+  }
+
+  // Settings modal state
+  if ($("#settings-modal") && st.oauth_configured) {
+    $("#settings-status").textContent = connected
+      ? `Connected as ${st.email || ""}`.trim()
+      : "Not connected yet.";
+  }
+  $("#disconnect-btn").classList.toggle("hidden", !connected);
+  renderGoogleButton();
+}
+
+/* ---------------------------------------------------------------- oauth */
+
+function renderGoogleButton() {
+  const st = state.status;
+  if (!st || !st.oauth_configured || !window.google) return;
+  const clientId = st.client_id;
+  if (!clientId) return;
+  // GIS "Sign in with Google" via server-side flow.
+  window.google.accounts.id.initialize({
+    client_id: clientId,
+    ux_mode: "redirect",
+    login_uri: st.base_url + "/oauth/callback",
+    callback: (resp) => {
+      // With ux_mode=redirect, Google POSTs the credential to login_uri;
+      // callback is not used for the code flow but we keep it for safety.
+      if (resp && resp.code) {
+        window.location.href = "/oauth/callback?code=" + encodeURIComponent(resp.code);
+      }
+    },
+  });
+  window.google.accounts.id.renderButton(
+    document.getElementById("google-button"),
+    { theme: "outline", size: "large", text: "continue_with", shape: "rectangular" }
+  );
 }
 
 function renderBadge() {
@@ -319,9 +386,68 @@ $("#modal-close").addEventListener("click", closeModal);
 $("#modal-save").addEventListener("click", saveModal);
 $("#modal").addEventListener("click", (e) => { if (e.target === $("#modal")) closeModal(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
-$("#refresh-btn").addEventListener("click", refresh);
+/* ---------------------------------------------------------------- settings / connect */
 
-/* ---------------------------------------------------------------- boot */
+function openSettings() {
+  const modal = $("#settings-modal");
+  const st = state.status;
+  modal.classList.remove("hidden");
+  async function load() {
+    const s = await api("/api/settings");
+    $("#creds-redirect").textContent = s.oauth_redirect_uri || "";
+    $("#settings-status").textContent = st && st.auth
+      ? `Connected as ${(st.email || "")}`.trim()
+      : (s.configured ? "Configured — click Connect Gmail below." : "Not configured. Paste your OAuth credentials below.");
+  }
+  load();
+  renderGoogleButton();
+}
+function closeSettings() {
+  $("#settings-modal").classList.add("hidden");
+}
+
+async function saveSettings() {
+  const clientId = $("#cfg-client-id").value.trim();
+  const clientSecret = $("#cfg-client-secret").value.trim();
+  try {
+    await api("/api/settings", {
+      method: "POST",
+      body: JSON.stringify({
+        client_id: clientId,
+        client_secret: clientSecret,
+      }),
+    });
+    $("#cfg-client-id").value = "";
+    $("#cfg-client-secret").value = "";
+    await loadStatus(); // re-fetch configured state + render GIS button
+    openSettings();
+  } catch (err) {
+    const el = $("#sync-error");
+    el.textContent = `Couldn't save settings: ${err.message}`;
+    el.classList.remove("hidden");
+  }
+}
+
+$("#connect-btn").addEventListener("click", () => openSettings());
+$("#settings-btn").addEventListener("click", () => openSettings());
+$("#settings-close").addEventListener("click", closeSettings);
+$("#settings-modal").addEventListener("click", (e) => {
+  if (e.target === $("#settings-modal")) closeSettings();
+});
+$("#cfg-save").addEventListener("click", saveSettings);
+$("#disconnect-btn").addEventListener("click", async () => {
+  try {
+    await api("/api/disconnect", { method: "POST" });
+    await loadStatus();
+    renderAll();
+  } catch (err) {
+    const el = $("#sync-error");
+    el.textContent = `Disconnect failed: ${err.message}`;
+    el.classList.remove("hidden");
+  }
+});
+
+$("#refresh-btn").addEventListener("click", refresh);
 
 (async function boot() {
   try {
@@ -338,6 +464,21 @@ $("#refresh-btn").addEventListener("click", refresh);
     const el = $("#sync-error");
     el.textContent = `Couldn't reach the backend: ${err.message}`;
     el.classList.remove("hidden");
+  }
+
+  // Deep-link hash routing for the connected/settings states.
+  const hash = window.location.hash;
+  if (hash === "#connected") {
+    // Refresh state now that we're authed from the callback redirect.
+    history.replaceState(null, "", "/");
+    await loadStatus();
+    renderAll();
+    $("#sync-error").classList.toggle("hidden", !state.status?.sync?.last_error);
+    if (state.status?.sync?.last_error) {
+      $("#sync-error").textContent = `Last sync failed: ${state.status.sync.last_error}`;
+    }
+  } else if (hash === "#settings") {
+    openSettings();
   }
   renderAll();
 })();

@@ -50,29 +50,31 @@ def _filter_relevant(email: EmailMessage) -> bool:
 def sync(
     client: GmailClient,
     db: Database,
+    user_id: int,
     full: bool = False,
     max_messages: int | None = None,
 ) -> SyncResult:
     """Scan Gmail, classify and upsert into the local database.
 
     full=False does an incremental sync from the last sync timestamp.
-    Returns a SyncResult summary.
+    Returns a SyncResult summary. All writes are scoped to `user_id`.
     """
     result = SyncResult(full=full)
 
+    last_key = f"last_sync_{user_id}"
     if full:
         query = f"newer_than:{settings.search_history_days}d"
     else:
-        last = db.get_meta("last_sync")
+        last = db.get_meta(last_key)
         query = f"after:{last}" if last else f"newer_than:{settings.search_history_days}d"
 
     emails: list[EmailMessage] = []
-    for envelope in client.list_messages(query):
+    for message_id in client.list_message_ids(query):
         if max_messages and result.scanned >= max_messages:
             break
         result.scanned += 1
         try:
-            email = client.fetch_metadata(envelope["id"])
+            email = client.fetch_metadata(message_id)
         except Exception:
             # A single message failing shouldn't abort the whole sync.
             result.skipped += 1
@@ -106,9 +108,9 @@ def sync(
             email.needs_action = act
             email.action_reason = reason
 
-        inserted = db.upsert_message(email.to_dict())
+        inserted = db.upsert_message(user_id, email.to_dict())
         result.saved += int(inserted)
         result.updated += int(not inserted)
 
-    db.set_meta("last_sync", datetime.now(tz=timezone.utc).date().isoformat())
+    db.set_meta(last_key, datetime.now(tz=timezone.utc).date().isoformat())
     return result
