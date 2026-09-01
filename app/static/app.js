@@ -154,6 +154,12 @@ async function refresh() {
     await pollWhileSyncing();
     await Promise.all([loadStatus(), loadStats(), loadCompanies(), loadFollowups(), loadMessages()]);
     renderAll();
+    const syncErr = state.status?.sync?.last_error;
+    if (syncErr) {
+      const el = $("#sync-error");
+      el.textContent = `Last sync failed: ${syncErr}`;
+      el.classList.remove("hidden");
+    }
   } catch (err) {
     const el = $("#sync-error");
     el.textContent = `Sync failed: ${err.message}`;
