@@ -1,0 +1,238 @@
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-2: #1d212a;
+  --border: #2a2f3a;
+  --text: #e6e8ee;
+  --muted: #9aa3b2;
+  --accent: #4f8cff;
+  --applied: #4f8cff;
+  --interview: #b58cff;
+  --offer: #3fd68f;
+  --rejection: #ff6b6b;
+  --other: #7a8496;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.45;
+}
+
+/* ------------------------------------------------ topbar */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 28px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, #12151c, #0f1115);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.brand { display: flex; gap: 14px; align-items: center; }
+.logo {
+  font-size: 26px;
+  width: 48px; height: 48px;
+  display: grid; place-items: center;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #4f8cff, #7a5cff);
+}
+.brand h1 { margin: 0; font-size: 19px; letter-spacing: -.02em; }
+.subtitle { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.topbar-actions { display: flex; align-items: center; gap: 12px; }
+
+.badge {
+  padding: 4px 10px; border-radius: 999px; font-size: 12px;
+  background: var(--accent); color: #fff;
+}
+.badge.hidden { display: none; }
+.badge.spinning { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .45; } }
+
+/* ------------------------------------------------ banners */
+.banner {
+  margin: 16px 28px 0; padding: 12px 16px; border-radius: var(--radius);
+  font-size: 14px;
+}
+.banner-warn { background: #3a2f1a; color: #ffd27a; border: 1px solid #6b551f; }
+.banner-error { background: #3a1d1d; color: #ff9d9d; border: 1px solid #6b2424; }
+.banner code { background: rgba(255,255,255,.08); padding: 2px 6px; border-radius: 4px; }
+.hidden { display: none !important; }
+
+/* ------------------------------------------------ layout */
+main { max-width: 1240px; margin: 0 auto; padding: 24px 28px 60px; }
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  min-width: 0;
+}
+.panel-wide { grid-column: 1 / -1; }
+.panel h2 {
+  margin: 0 0 12px; font-size: 14px;
+  text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+}
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.panel-head h2 { margin: 0; }
+.chip {
+  background: var(--panel-2); color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 1px 8px; border-radius: 999px; font-size: 12px;
+}
+
+/* ------------------------------------------------ stats */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px;
+}
+.stat-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.stat-num { font-size: 30px; font-weight: 700; letter-spacing: -.03em; }
+.stat-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+.stat-card[data-key="application"] .stat-num { color: var(--applied); }
+.stat-card[data-key="interview"] .stat-num { color: var(--interview); }
+.stat-card[data-key="offer"] .stat-num { color: var(--offer); }
+.stat-card[data-key="rejection"] .stat-num { color: var(--rejection); }
+.stat-card[data-key="other"] .stat-num { color: var(--other); }
+.stat-card.data-key-action .stat-num { color: #ffb454; }
+
+/* ------------------------------------------------ lists & tables */
+.list { display: flex; flex-direction: column; gap: 8px; max-height: 560px; overflow: auto; }
+.table-wrap { overflow: auto; }
+.empty { color: var(--muted); font-size: 13px; padding: 8px 2px; }
+
+.email-row {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  transition: border-color .15s;
+}
+.email-row:hover { border-color: var(--accent); }
+.email-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.email-subject { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.email-company { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.email-date { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.email-snippet { color: var(--muted); font-size: 13px; }
+.stage-tag {
+  font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: .03em;
+  white-space: nowrap;
+}
+.stage-application { background: rgba(79,140,255,.15); color: var(--applied); }
+.stage-interview   { background: rgba(181,140,255,.15); color: var(--interview); }
+.stage-offer       { background: rgba(63,214,143,.15); color: var(--offer); }
+.stage-rejection   { background: rgba(255,107,107,.15); color: var(--rejection); }
+.stage-other       { background: rgba(122,132,150,.15); color: var(--other); }
+.action-pill {
+  font-size: 11px; color: #ffb454; background: rgba(255,180,84,.12);
+  padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+}
+
+/* company table */
+table.pipeline { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pipeline th {
+  text-align: left; color: var(--muted); font-weight: 500;
+  padding: 6px 8px; border-bottom: 1px solid var(--border);
+}
+.pipeline td { padding: 8px; border-bottom: 1px solid var(--border); }
+.pipeline tr:last-child td { border-bottom: none; }
+.pipeline .company-name { font-weight: 600; }
+.pipeline .role-list { color: var(--muted); font-size: 12px; }
+.pipeline .count { color: var(--muted); text-align: center; }
+.pipeline .last { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+/* ------------------------------------------------ controls */
+.btn {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.btn:hover { border-color: var(--accent); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { filter: brightness(1.1); }
+.btn-ghost { background: transparent; }
+.btn:disabled { opacity: .5; cursor: default; }
+
+.filters { display: flex; gap: 8px; flex-wrap: wrap; }
+.filters input[type="search"], .filters select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+.filters input[type="search"] { min-width: 220px; }
+
+/* ------------------------------------------------ modal */
+.modal {
+  position: fixed; inset: 0;
+  background: rgba(5,7,10,.7);
+  display: grid; place-items: center;
+  z-index: 100;
+  padding: 20px;
+}
+.modal-box {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: min(720px, 100%);
+  max-height: 86vh;
+  display: flex; flex-direction: column;
+  padding: 20px;
+}
+.modal-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.modal-head h3 { margin: 0; font-size: 16px; line-height: 1.35; }
+.modal-meta { color: var(--muted); font-size: 13px; margin: 6px 0 14px; }
+.modal-actions {
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;
+  padding-bottom: 14px; border-bottom: 1px solid var(--border); margin-bottom: 14px;
+}
+.modal-actions label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.modal-actions select, .modal-actions input[type="text"] {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 8px; padding: 7px 10px; font-size: 13px; min-width: 140px;
+}
+.modal-body {
+  overflow: auto; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px; color: var(--muted); white-space: pre-wrap; word-break: break-word;
+}
+
+@media (max-width: 760px) {
+  .grid { grid-template-columns: 1fr; }
+  .panel-wide { grid-column: auto; }
+}

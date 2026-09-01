@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Internship Dashboard</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">✉</span>
+    <div>
+      <h1>Internship Pipeline</h1>
+      <p class="subtitle">live view of your applications, straight from Gmail</p>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <span id="sync-badge" class="badge hidden"></span>
+    <button id="refresh-btn" class="btn btn-primary">⟳ Sync now</button>
+  </div>
+</header>
+
+<section id="auth-banner" class="banner banner-warn hidden">
+  <strong>Gmail not connected.</strong>
+  Run <code>python bin/setup_oauth.py</code> once, then start the server and hit Sync.
+</section>
+
+<section id="sync-error" class="banner banner-error hidden"></section>
+
+<main>
+
+  <section class="stats" id="stats">
+    <div class="stat-card" data-key="application"><div class="stat-num" id="stat-application">–</div><div class="stat-label">Applied</div></div>
+    <div class="stat-card" data-key="interview"><div class="stat-num" id="stat-interview">–</div><div class="stat-label">Interviewing</div></div>
+    <div class="stat-card" data-key="offer"><div class="stat-num" id="stat-offer">–</div><div class="stat-label">Offers</div></div>
+    <div class="stat-card" data-key="rejection"><div class="stat-num" id="stat-rejection">–</div><div class="stat-label">Rejected</div></div>
+    <div class="stat-card data-key-action"><div class="stat-num" id="stat-action">–</div><div class="stat-label">Needs action</div></div>
+    <div class="stat-card" data-key="other"><div class="stat-num" id="stat-total">–</div><div class="stat-label">Total tracked</div></div>
+  </section>
+
+  <div class="grid">
+
+    <section class="panel" id="followups-panel">
+      <h2>Follow-ups <span id="followup-count" class="chip"></span></h2>
+      <div id="followups" class="list">
+        <p class="empty">No follow-ups right now. 🎉</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Companies</h2>
+      <div id="companies" class="table-wrap">
+        <p class="empty">Sync your inbox to populate the pipeline.</p>
+      </div>
+    </section>
+
+    <section class="panel panel-wide">
+      <div class="panel-head">
+        <h2>Emails</h2>
+        <div class="filters">
+          <input id="search" type="search" placeholder="Search subject / company…" />
+          <select id="stage-filter">
+            <option value="all">All stages</option>
+            <option value="application">Applied</option>
+            <option value="interview">Interviewing</option>
+            <option value="offer">Offer</option>
+            <option value="rejection">Rejected</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+      </div>
+      <div id="messages" class="list">
+        <p class="empty">No emails loaded.</p>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<!-- detail modal -->
+<div id="modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="modal-subject"></h3>
+      <button id="modal-close" class="btn btn-ghost">✕</button>
+    </div>
+    <p class="modal-meta" id="modal-meta"></p>
+    <div class="modal-actions">
+      <label>Stage
+        <select id="modal-stage">
+          <option value="application">Applied</option>
+          <option value="interview">Interviewing</option>
+          <option value="offer">Offer</option>
+          <option value="rejection">Rejected</option>
+          <option value="other">Other</option>
+        </select>
+      </label>
+      <label>Note
+        <input id="modal-note" type="text" placeholder="note to self…" />
+      </label>
+      <button id="modal-save" class="btn btn-primary">Save</button>
+      <button id="modal-dismiss" class="btn">✓ Mark done</button>
+    </div>
+    <div id="modal-body" class="modal-body">Loading…</div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
