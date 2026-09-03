@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import base64
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterator, Optional
 
 from google.auth.exceptions import GoogleAuthError, RefreshError
@@ -60,10 +60,23 @@ class GmailClient:
     # ------------------------------------------------------------------ auth
 
     def _normalize_expiry(self) -> None:
-        """Pin expiry to aware UTC so google-auth's `expired` never compares
-        a naive datetime against its aware utcnow()."""
         if self._creds.expiry is not None and self._creds.expiry.tzinfo is None:
             self._creds.expiry = self._creds.expiry.replace(tzinfo=timezone.utc)
+
+    @staticmethod
+    def _expired(creds) -> bool:
+        """Aware-UTC expiry check.
+
+        google-auth's `Credentials.expired` compares `self.expiry` against
+        `_helpers.utcnow()`, which is naive -> TypeError when expiry is aware.
+        Replicate the same logic with fully-aware datetimes.
+        """
+        expiry = creds.expiry
+        if expiry is not None and expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        if expiry is None:
+            return False
+        return expiry < datetime.now(timezone.utc) + timedelta(minutes=3)
 
     def user_email(self) -> str:
         return self.service().users().getProfile(userId="me").execute().get("emailAddress", "")
@@ -76,8 +89,7 @@ class GmailClient:
         try:
             if not self._creds.token:
                 return False
-            self._normalize_expiry()
-            if self._creds.expired and self._creds.refresh_token:
+            if self._expired(self._creds) and self._creds.refresh_token:
                 self._creds.refresh(Request())
                 self._normalize_expiry()
             return True
@@ -95,8 +107,7 @@ class GmailClient:
     def service(self):
         if self._service is None:
             creds = self._creds
-            self._normalize_expiry()
-            if creds.expired and creds.refresh_token:
+            if self._expired(creds) and creds.refresh_token:
                 creds.refresh(Request())
                 self._normalize_expiry()
             self._service = build("gmail", "v1", credentials=creds, cache_discovery=False)
