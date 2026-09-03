@@ -59,6 +59,12 @@ class GmailClient:
 
     # ------------------------------------------------------------------ auth
 
+    def _normalize_expiry(self) -> None:
+        """Pin expiry to aware UTC so google-auth's `expired` never compares
+        a naive datetime against its aware utcnow()."""
+        if self._creds.expiry is not None and self._creds.expiry.tzinfo is None:
+            self._creds.expiry = self._creds.expiry.replace(tzinfo=timezone.utc)
+
     def user_email(self) -> str:
         return self.service().users().getProfile(userId="me").execute().get("emailAddress", "")
 
@@ -70,16 +76,10 @@ class GmailClient:
         try:
             if not self._creds.token:
                 return False
-            # Normalise expiry to aware UTC to avoid naive/aware comparisons
-            # inside google-auth's `expired` property / refresh flow.
-            if self._creds.expiry is not None and self._creds.expiry.tzinfo is None:
-                self._creds.expiry = self._creds.expiry.replace(tzinfo=timezone.utc)
+            self._normalize_expiry()
             if self._creds.expired and self._creds.refresh_token:
                 self._creds.refresh(Request())
-                # After a refresh the library may leave expiry naive; pin it to
-                # aware UTC so subsequent `expired` checks stay consistent.
-                if self._creds.expiry is not None and self._creds.expiry.tzinfo is None:
-                    self._creds.expiry = self._creds.expiry.replace(tzinfo=timezone.utc)
+                self._normalize_expiry()
             return True
         except (GoogleAuthError, RefreshError):
             return False
@@ -95,8 +95,10 @@ class GmailClient:
     def service(self):
         if self._service is None:
             creds = self._creds
+            self._normalize_expiry()
             if creds.expired and creds.refresh_token:
                 creds.refresh(Request())
+                self._normalize_expiry()
             self._service = build("gmail", "v1", credentials=creds, cache_discovery=False)
         return self._service
 
