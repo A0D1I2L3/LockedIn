@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import base64
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Iterator, Optional
 
 from google.auth.exceptions import GoogleAuthError, RefreshError
@@ -53,30 +53,15 @@ class GmailClient:
             client_secret=client_secret,
         )
         if expires_at:
-            # Credentials.expiry is a datetime; set from epoch ms (aware UTC).
-            self._creds.expiry = datetime.fromtimestamp(expires_at / 1000, tz=timezone.utc)
+            # google-auth's `expired` compares expiry against _helpers.utcnow()
+            # which is NAIVE, so store expiry as naive UTC to avoid the
+            # offset-naive vs offset-aware TypeError.
+            self._creds.expiry = datetime.fromtimestamp(
+                expires_at / 1000, tz=timezone.utc
+            ).replace(tzinfo=None)
         self._service = None
 
     # ------------------------------------------------------------------ auth
-
-    def _normalize_expiry(self) -> None:
-        if self._creds.expiry is not None and self._creds.expiry.tzinfo is None:
-            self._creds.expiry = self._creds.expiry.replace(tzinfo=timezone.utc)
-
-    @staticmethod
-    def _expired(creds) -> bool:
-        """Aware-UTC expiry check.
-
-        google-auth's `Credentials.expired` compares `self.expiry` against
-        `_helpers.utcnow()`, which is naive -> TypeError when expiry is aware.
-        Replicate the same logic with fully-aware datetimes.
-        """
-        expiry = creds.expiry
-        if expiry is not None and expiry.tzinfo is None:
-            expiry = expiry.replace(tzinfo=timezone.utc)
-        if expiry is None:
-            return False
-        return expiry < datetime.now(timezone.utc) + timedelta(minutes=3)
 
     def user_email(self) -> str:
         return self.service().users().getProfile(userId="me").execute().get("emailAddress", "")
@@ -89,9 +74,8 @@ class GmailClient:
         try:
             if not self._creds.token:
                 return False
-            if self._expired(self._creds) and self._creds.refresh_token:
+            if self._creds.expired and self._creds.refresh_token:
                 self._creds.refresh(Request())
-                self._normalize_expiry()
             return True
         except (GoogleAuthError, RefreshError):
             return False
@@ -107,9 +91,8 @@ class GmailClient:
     def service(self):
         if self._service is None:
             creds = self._creds
-            if self._expired(creds) and creds.refresh_token:
+            if creds.expired and creds.refresh_token:
                 creds.refresh(Request())
-                self._normalize_expiry()
             self._service = build("gmail", "v1", credentials=creds, cache_discovery=False)
         return self._service
 
