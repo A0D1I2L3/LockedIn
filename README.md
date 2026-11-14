@@ -1,231 +1,185 @@
 # LockedIn
 
-Track every internship application that lands in your Gmail, on one clean
-dashboard. Application, recruiter ping, interview, offer, rejection — each
-email is auto-classified into a pipeline you can read at a glance, and every
-user signs in with their own Google account so their inbox stays private.
+A private internship-application tracker. Add each application, paste the
+company emails you already have, and the app extracts the stage, next action,
+and check-back date. When that date arrives it nudges you in the dashboard, in
+your browser, and through an ICS calendar feed.
+
+No Gmail access, no inbox mirroring, and no background mailbox sync.
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│  Applied  100   Interviewing  12   Offers  3   Rejected 40 │
-├────────────────────────────┬───────────────────────────────┤
-│  Follow-ups                 │  Companies / pipeline          │
-│  ⚠ Jane Street — pick a time│  ┌──────────────┬──────────┐   │
-│  ⚠ Stripe — no answer in 5d │  │ Company      │ Status   │   │
-│                             │  │ Jane Street  │ Interview│   │
-├────────────────────────────┴───────────────────────────────┤
-│  Emails — searchable, filterable, click to read + recategorize │
-└────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│ Applied 12   Assessment 3   Interviewing 2   Offers 1   Rejected 4  │
+├───────────────────────────────────┬──────────────────────────────────┤
+│ Needs attention                   │ Coming up                        │
+│ ⚠ Stripe — reply with availability │ • Acme — check back tomorrow     │
+│ ⚠ Figma — assessment due today     │ • Ramp — offer response in 2d    │
+├───────────────────────────────────┴──────────────────────────────────┤
+│ Applications: company, stage, next action, check-back, outcome       │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-## What this is
+## What it does
 
-- **Multi-user** — people sign in with **"Continue with Google"**. Each user's
-  Gmail is tracked separately and their data is kept private.
-- **Auto-classification** — subject + snippet are scored to label each email
-  `applied`, `interviewing`, `offer`, `rejection`, or `other`.
-- **Company & role extraction** — derived from the sender
-  (`careers.janestreet.com` → *Jane Street*); easy to tune.
-- **Follow-up radar** — surfaces emails that need a reply ("pick a time…",
-  "please confirm…") and silent threads that have gone cold.
-- **Manual override** — correct a misclassification or add a note from the UI.
-- **Stats & pipeline** — per-company status, per-stage counts, last-contact.
-- **Scheduled syncs** — a headless `bin/refresh.py` you can run from cron.
+- **Manual pipeline** — add a company/role once, then record outcomes
+  (`rejected`, `offer`, `assessment`, `interview`, `followed up`,
+  `no response`, `withdrawn`) as they happen.
+- **Paste an email, get a draft** — a rules parser extracts company, role,
+  stage, next action, and response window. Dates like "within 2 weeks",
+  "7–10 business days", and "by January 20" become a concrete check-back.
+- **Optional LLM fallback** — OpenAI, xAI Grok, or Anthropic Claude can fill
+  gaps when the rules are unsure. It is opt-in and the API key is encrypted at
+  rest.
+- **Reminders** — due check-backs and action deadlines appear in the dashboard,
+  can trigger browser notifications, and export to `.ics`.
+- **Multi-user** — Google sign-in is identity only; every query is scoped to
+  the signed-in `user_id`.
 
 ## Stack
 
-| Layer     | Choice                                           |
-|-----------|--------------------------------------------------|
-| Backend   | Python 3.10+, FastAPI, Uvicorn                   |
-| Auth      | Google OAuth (Sign in with Google, web client)   |
-| Gmail     | Gmail API v1 via `google-api-python-client`      |
-| Storage   | SQLite (stdlib `sqlite3`)                        |
-| Frontend  | Vanilla HTML/CSS/JS — no build step              |
-
-Gmail messages are *mirrored* into a SQLite database, so the dashboard stays
-fast and keeps working offline.
-
----
+| Layer    | Choice                                           |
+|----------|--------------------------------------------------|
+| Backend  | Python 3.10+, FastAPI, Uvicorn                   |
+| Auth     | Google OAuth (openid/email/profile only)         |
+| Storage  | SQLite via stdlib `sqlite3`                      |
+| Parser   | Deterministic rules + optional OpenAI/Grok/Claude |
+| Frontend | Vanilla HTML/CSS/JS, Tailwind CDN, no build step |
 
 ## Run it locally
 
-### 1. Clone & install
-
 ```bash
-git clone https://github.com/A0D1I2L3/LockedIn.git
-cd LockedIn
-
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env
 
-cp .env.example .env    # optional tweaks
+python bin/serve.py     # http://127.0.0.1:8000
 ```
 
-### 2. Create a Google Cloud project (one time)
+### Google sign-in setup
 
-1. [Google Cloud Console](https://console.cloud.google.com/) → create a project.
-2. **APIs & Services → Library** → enable the **Gmail API**.
-3. **APIs & Services → OAuth consent screen** → **External** → add yourself as
-   a test user. Scopes: `gmail.readonly`, `gmail.modify`.
-4. **Credentials → Create credentials → OAuth client ID** → application type
-   **Web application**.
-5. Set **Authorized redirect URIs** to:
-   - locally: `http://127.0.0.1:8000/oauth/callback`
-   - on Render: `https://YOUR-APP.onrender.com/oauth/callback`
-6. Copy the **Client ID** and **Client secret**.
+1. Create a project in [Google Cloud Console](https://console.cloud.google.com/).
+2. Configure the OAuth consent screen (External is fine for testing).
+3. Create an OAuth **Web application** client.
+4. Add the redirect URI `http://127.0.0.1:8000/oauth/callback`.
+5. Open the app → **Settings** → paste the client ID/secret. No Gmail API or
+   Gmail scopes are needed.
 
-### 3. Start the server
+If you only want to try the tracker locally, the app still works after sign-in
+is configured; there is no mailbox connection step.
 
-```bash
-python bin/serve.py     # → http://127.0.0.1:8000
-```
+### Optional LLM parsing
 
-Open `http://127.0.0.1:8000` → click **Settings** → paste the **Client ID** and
-**Client secret** → save. Then click **Connect Gmail** and approve.
+In **Settings**, choose a provider (**OpenAI**, **xAI Grok**, or **Anthropic
+Claude**), then add the API key. Base URL and model are pre-filled with that
+provider's defaults and remain editable for proxies or newer models. Parser
+mode defaults to `auto`: rules run first, and the LLM is only called when
+confidence is below 65%. Failures fall back to the rules result. Use `rules`
+for a fully local app.
 
-Click **⟳ Sync now** for a first pass (scans the last ~180 days). Future runs
-are incremental.
+Environment equivalents are `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`,
+`LLM_API_KEY`, and `LLM_TIMEOUT_SECONDS`.
 
-### 4. Keep it fresh (optional)
+## Everyday flow
 
-```bash
-crontab -e
-# every morning at 08:00 — sync user A
-0 8 * * * cd /path/to/LockedIn && .venv/bin/python bin/refresh.py --email you@gmail.com
-```
+1. **Add application** — company, role, optional URL/source/notes.
+2. Paste the confirmation email into **Autofill from email** and press
+   **Parse email**. Review the fields, then save.
+3. The app schedules a check-back. On the **Today** view, due items can be
+   opened, snoozed, or marked done.
+4. When a reply arrives, open the application, paste the email, and press
+   **Attach & update**. The stage and next action change; rejected/withdrawn
+   applications close automatically.
+5. Record the final outcome with the outcome buttons.
 
-See [`bin/refresh.py --help`](bin/refresh.py) for `--full` and `--max` options.
+## Calendar & browser reminders
 
----
-
-## Deploy to Render
-
-Render walks you through this; here are the exact settings that match this
-repo. You can do most of step 2 in parallel once the web service is up.
-
-### A. Create the web service
-
-1. **Dashboard → New → Web Service** → connect your GitHub repo (LockedIn).
-2. Name: `lockedin`, **Region**: a free-plan region, **Branch**: `master`.
-3. **Runtime**: Python 3.
-4. **Build command**: `pip install -r requirements.txt`
-5. **Start command**: `python bin/serve.py`
-6. Save and let it build (first deploy will be shown as "deploy failed" until
-   the env vars below are set — that's expected).
-
-### B. Add env vars
-
-In the service → **Environment** → add:
-
-| Variable                | Value                                        |
-|-------------------------|----------------------------------------------|
-| `PORT`                  | `10000`                                      |
-| `HOST`                  | `0.0.0.0`                                    |
-| `BASE_URL`              | `https://lockedin.onrender.com` (your URL)   |
-| `GOOGLE_CLIENT_ID`      | from Google Console                          |
-| `GOOGLE_CLIENT_SECRET`  | from Google Console                          |
-| `SECRET_KEY`            | a long random string (see below)             |
-| `DATA_DIR`              | `/data` (the mounted disk)                   |
-| `DB_PATH`               | `/data/dashboard.db` (optional)              |
-
-Generate a random SECRET_KEY:
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-### C. Attach a persistent disk
-
-Data must survive redeploys:
-
-1. Service → **Disks → Attach a disk** → name `data`, **Mount path**: `/data`.
-2. Now `DATA_DIR`/`DB_PATH` point at the disk, so users, tokens, and messages
-   persist.
-
-### D. Finish Google OAuth
-
-- Add the **Authorized redirect URI** `https://lockedin.onrender.com/oauth/callback`
-  and your domain as an authorized JS origin.
-- Set OAuth consent screen to **External** and **Publish** it (otherwise only
-  test users can sign in).
-- Publish a **new deploy** in Render after adding the env vars / disk.
-
-Open your app — click **Settings**, confirm the Client ID/Secret are filled,
-then **Connect Gmail**.
-
----
+- `GET /api/calendar.ics` exports every active check-back and action.
+- Each application has its own `.ics` download in the detail view.
+- Browser notifications are opt-in from the sidebar or Calendar view. The page
+  checks for due items every minute while open; a service worker renders the
+  notification and focuses the app when clicked.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `python bin/serve.py` | Start the dashboard server |
-| `python bin/refresh.py --email you@gmail.com [--full] [--max N]` | Headless sync |
+| `python bin/serve.py` | Start the server |
 | `pytest` | Run the test suite |
 
 ## API
 
 | Endpoint | Description |
 |---|---|
-| `GET  /api/me` | Current signed-in user |
-| `GET  /api/status` | Auth + sync state |
-| `POST /api/refresh` | Trigger sync (`?full=true` for full re-scan) |
-| `GET  /api/stats` | Counts per stage |
-| `GET  /api/companies` | Per-company pipeline summary |
-| `GET  /api/messages` | Emails, filterable: `stage`, `company`, `q`, `needs_action` |
-| `GET  /api/messages/{id}/body` | Plain-text email body |
-| `PATCH /api/messages/{id}` | Override stage, add note, dismiss/rearm action |
+| `GET /api/me` | Current signed-in user |
+| `GET /api/status` | Auth state + pipeline counts |
+| `GET /api/applications?stage=&status=&q=` | List applications |
+| `POST /api/applications` | Create an application |
+| `GET /api/applications/{id}` | Application detail |
+| `PATCH /api/applications/{id}` | Edit fields or stage |
+| `DELETE /api/applications/{id}` | Delete application + related rows |
+| `POST /api/applications/{id}/outcome` | Record an outcome |
+| `POST /api/applications/{id}/snooze` | Push the check-back out |
+| `POST /api/parse-email` | Preview a parse without saving |
+| `POST /api/applications/{id}/emails` | Attach a pasted email; `apply` updates the app |
+| `GET /api/applications/{id}/timeline` | Events + pasted emails |
+| `GET /api/due`, `GET /api/notifications` | Reminder feed |
+| `GET /api/calendar.ics` | Full ICS export |
+| `GET/POST /api/settings` | OAuth client, parser, timezone, notifications |
+| `GET /oauth/login`, `GET /oauth/callback` | Google identity flow |
 
-## How classification works
+## Parsing rules
 
-`app/classify.py` scores each email by keyword and picks the highest-scoring
-stage above a threshold. Company comes from the sender domain with an override
-map; role is a best-effort extraction from the subject. You'll likely want to
-tune:
+`app/parser/` is split into:
 
-```python
-# app/classify.py
-COMPANY_OVERRIDES = {...}   # domain → pretty company name
-_STAGE_KEYWORDS    = {...}   # add phrases you see in your own inbox
-```
+- `dates.py` — explicit dates, relative windows, business days, event dates.
+- `rules.py` — stage classification, company/role extraction, next action.
+- `llm.py` — optional JSON-mode LLM parser validated with Pydantic.
+- `pipeline.py` — merges rules + LLM, resolves the check-back timestamp, and
+  returns an editable draft.
 
-And `FOLLOWUP_AFTER_DAYS` (default 2, in `.env`) controls when a silent
-application thread shows up under *Follow-ups*.
+Rules are intentionally conservative: unrecognised text becomes `applied` with
+low confidence rather than a confident wrong stage. A default check-back
+(`DEFAULT_FOLLOW_UP_DAYS`, 7 days) is used when no timeline is stated.
+
+## Deploy to Render
+
+1. Create a **Web Service** from this repo.
+2. Build command: `pip install -r requirements.txt`
+3. Start command: `python bin/serve.py`
+4. Environment:
+   - `BASE_URL=https://your-app.onrender.com`
+   - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+   - `SECRET_KEY` (stable random string)
+   - `DATA_DIR=/data`
+5. Attach a persistent disk mounted at `/data`.
+6. Add `https://your-app.onrender.com/oauth/callback` as an authorized redirect
+   URI in Google Cloud Console.
 
 ## Security notes
 
-- `data/` (db, tokens, secret store) is git-ignored — never commit these.
-- Passwords and OAuth secrets are stored **encrypted** (Fernet). `SECRET_KEY`
-  guards the session cookie and the secret store; keep it stable between
+- `data/` (SQLite, Fernet key, encrypted secrets) is git-ignored.
+- Google client secrets and LLM keys are encrypted with Fernet.
+- Sessions are HMAC-signed cookies. Set `SECRET_KEY` to keep them stable across
   deploys.
-- The OAuth token has read + modify access to a user's Gmail. The app only
-  reads and stores metadata + snippets; it does not delete anything.
-- Locally the server binds to `127.0.0.1`; on Render it binds `0.0.0.0`
-  behind Render's TLS. Don't disable that.
+- The app requests no Gmail scopes and stores no Google access/refresh tokens.
 
 ## Project layout
 
 ```
 app/
-  config.py        settings + .env/env loading
-  models.py        dataclasses
-  auth.py          session cookies + encrypted token storage
-  secret_store.py  encrypted store for OAuth client id/secret
-  db.py            SQLite layer (multi-user)
-  oauth.py         Google OAuth exchange + userinfo
-  classify.py      stage/company/role logic
-  gmail_client.py  Gmail API wrapper
-  pipeline.py      fetch → classify → store
-  api.py           FastAPI app + endpoints
-  static/          dashboard UI
-bin/               serve / refresh (OAuth setup now happens in-app)
+  api.py           FastAPI routes
+  auth.py          signed session cookies
+  config.py        env/.env settings
+  db.py            SQLite schema + queries
+  models.py        stages, outcomes, reminders, serializers
+  notifications.py ICS export + notification feed
+  oauth.py         Google identity flow
+  parser/          rules, dates, LLM, pipeline
+  reminders.py     schedule/snooze/due feed
+  secret_store.py  encrypted secret storage
+  timeutil.py      epoch-ms helpers
+  static/          dashboard, service worker, icon
+bin/serve.py       Uvicorn entrypoint
 tests/             pytest suite
 ```
-
-## Roadmap
-
-- [ ] Label the real email thread from the dashboard (e.g. add a "Offer" label)
-- [ ] Thread-level view instead of per-message
-- [ ] Export pipeline to CSV
-- [ ] Gmail push notifications for live updates

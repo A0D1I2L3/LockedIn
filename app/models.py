@@ -1,132 +1,128 @@
-"""Domain models for emails flowing through the pipeline."""
+"""Domain constants and lightweight row serializers.
+
+The app tracks applications, not email threads. A single application can have
+many pasted emails, reminders, and timeline events.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Optional
+import json
+from typing import Any, Optional
 
-# Pipeline stages an email can be classified into.
-STAGE_APPLICATION = "application"  # application submitted / confirmed
-STAGE_INTERVIEW = "interview"  # screening, interviews, assessments
-STAGE_OFFER = "offer"  # offer / offer-related
-STAGE_REJECTION = "rejection"  # rejection / pause
-STAGE_OTHER = "other"  # everything else
+# --------------------------------------------------------------------- stages
+
+STAGE_APPLIED = "applied"
+STAGE_ASSESSMENT = "assessment"
+STAGE_INTERVIEW = "interview"
+STAGE_OFFER = "offer"
+STAGE_REJECTED = "rejected"
+STAGE_WITHDRAWN = "withdrawn"
 
 STAGES = [
-    STAGE_APPLICATION,
+    STAGE_APPLIED,
+    STAGE_ASSESSMENT,
     STAGE_INTERVIEW,
     STAGE_OFFER,
-    STAGE_REJECTION,
-    STAGE_OTHER,
+    STAGE_REJECTED,
+    STAGE_WITHDRAWN,
 ]
 
 STAGE_LABELS = {
-    STAGE_APPLICATION: "Applied",
+    STAGE_APPLIED: "Applied",
+    STAGE_ASSESSMENT: "Assessment",
     STAGE_INTERVIEW: "Interviewing",
     STAGE_OFFER: "Offer",
-    STAGE_REJECTION: "Rejected",
-    STAGE_OTHER: "Other",
+    STAGE_REJECTED: "Rejected",
+    STAGE_WITHDRAWN: "Withdrawn",
 }
 
+TERMINAL_STAGES = {STAGE_REJECTED, STAGE_WITHDRAWN}
 
-@dataclass
-class EmailMessage:
-    """A single Gmail message relevant to an internship application."""
+# --------------------------------------------------------------------- status
 
-    id: str
-    thread_id: str
-    subject: str
-    from_name: str
-    from_email: str
-    from_domain: str
-    date_ts: int  # epoch milliseconds
-    snippet: str = ""
-    labels: list[str] = field(default_factory=list)
+STATUS_ACTIVE = "active"
+STATUS_CLOSED = "closed"
 
-    # Set by the classifier.
-    stage: str = STAGE_OTHER
-    company: str = ""
-    role: str = ""
-    needs_action: bool = False
-    action_reason: str = ""
+ACTION_WAITING = "waiting"
+ACTION_REQUIRED = "action_required"
+ACTION_FOLLOW_UP = "follow_up_due"
+ACTION_DONE = "done"
 
-    @property
-    def display_date(self) -> str:
-        from datetime import datetime, timezone
+ACTIONS = [ACTION_WAITING, ACTION_REQUIRED, ACTION_FOLLOW_UP, ACTION_DONE]
 
-        if not self.date_ts:
-            return ""
-        dt = datetime.fromtimestamp(self.date_ts / 1000, tz=timezone.utc)
-        return dt.astimezone().strftime("%Y-%m-%d %H:%M")
+# ------------------------------------------------------------------- outcomes
 
-    def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "thread_id": self.thread_id,
-            "subject": self.subject,
-            "from_name": self.from_name,
-            "from_email": self.from_email,
-            "from_domain": self.from_domain,
-            "date_ts": self.date_ts,
-            "snippet": self.snippet,
-            "labels": self.labels,
-            "stage": self.stage,
-            "company": self.company,
-            "role": self.role,
-            "needs_action": self.needs_action,
-            "action_reason": self.action_reason,
-        }
+OUTCOME_REJECTED = "rejected"
+OUTCOME_OFFER = "offer"
+OUTCOME_ASSESSMENT = "assessment"
+OUTCOME_INTERVIEW = "interview"
+OUTCOME_FOLLOW_UP = "follow_up"
+OUTCOME_NO_RESPONSE = "no_response"
+OUTCOME_WITHDRAWN = "withdrawn"
+OUTCOME_OTHER = "other"
 
-    @classmethod
-    def from_row(cls, row: dict) -> "EmailMessage":
-        return cls(
-            id=row["id"],
-            thread_id=row["thread_id"],
-            subject=row["subject"] or "",
-            from_name=row["from_name"] or "",
-            from_email=row["from_email"] or "",
-            from_domain=row["from_domain"] or "",
-            date_ts=row["date_ts"] or 0,
-            snippet=row["snippet"] or "",
-            labels=row["labels"].split(",") if row["labels"] else [],
-            stage=row["stage"] or STAGE_OTHER,
-            company=row["company"] or "",
-            role=row["role"] or "",
-            needs_action=bool(row["needs_action"]),
-            action_reason=row["action_reason"] or "",
-        )
+OUTCOMES = [
+    OUTCOME_REJECTED,
+    OUTCOME_OFFER,
+    OUTCOME_ASSESSMENT,
+    OUTCOME_INTERVIEW,
+    OUTCOME_FOLLOW_UP,
+    OUTCOME_NO_RESPONSE,
+    OUTCOME_WITHDRAWN,
+    OUTCOME_OTHER,
+]
+
+# ------------------------------------------------------------------ reminders
+
+REMINDER_CHECK_BACK = "check_back"
+REMINDER_DEADLINE = "deadline"
+REMINDER_INTERVIEW = "interview"
+REMINDER_FOLLOW_UP = "follow_up"
+
+REMINDER_PENDING = "pending"
+REMINDER_DONE = "done"
+REMINDER_DISMISSED = "dismissed"
+REMINDER_CANCELLED = "cancelled"
+
+# --------------------------------------------------------------------- events
+
+EVENT_CREATED = "created"
+EVENT_UPDATED = "updated"
+EVENT_EMAIL = "email"
+EVENT_OUTCOME = "outcome"
+EVENT_SNOOZE = "snooze"
+EVENT_REMINDER = "reminder"
+EVENT_NOTE = "note"
+
+PARSER_VERSION = "rules-v1"
 
 
-@dataclass
-class SyncResult:
-    """Summary of a sync run."""
-
-    scanned: int = 0
-    saved: int = 0
-    updated: int = 0
-    skipped: int = 0
-    full: bool = False
-
-    def to_dict(self) -> dict:
-        return {
-            "scanned": self.scanned,
-            "saved": self.saved,
-            "updated": self.updated,
-            "skipped": self.skipped,
-            "full": self.full,
-        }
+def json_load(value: Optional[str], default: Any = None) -> Any:
+    if value is None:
+        return default
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return default
 
 
-@dataclass
-class FollowUp:
-    """A company email that looks like it needs a reply."""
+def serialize_application(row: dict) -> dict:
+    return dict(row)
 
-    message: EmailMessage
-    days_old: int
-    reason: Optional[str] = None
 
-    def to_dict(self) -> dict:
-        data = self.message.to_dict()
-        data["days_old"] = self.days_old
-        data["recommended_action"] = self.reason or self.message.action_reason
-        return data
+def serialize_email(row: dict) -> dict:
+    data = dict(row)
+    data["parsed"] = json_load(data.pop("parsed_json", None), {})
+    return data
+
+
+def serialize_reminder(row: dict) -> dict:
+    data = dict(row)
+    data["payload"] = json_load(data.pop("payload_json", None), {})
+    return data
+
+
+def serialize_event(row: dict) -> dict:
+    data = dict(row)
+    data["data"] = json_load(data.pop("data_json", None), {})
+    return data

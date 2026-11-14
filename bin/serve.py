@@ -1,10 +1,9 @@
-"""Start the dashboard server.
+"""Start the internship tracker server.
 
     python bin/serve.py
 
-For Render: the platform sets PORT and expects the app to bind 0.0.0.0.
-If PORT is set in the environment we bind to 0.0.0.0:PANEL and honour BASE_URL
-for the OAuth redirect URI; otherwise we bind localhost:8000 by default.
+Render sets PORT and expects the app to bind 0.0.0.0. Otherwise the server
+binds the configured HOST/PORT (127.0.0.1:8000 by default).
 """
 
 from __future__ import annotations

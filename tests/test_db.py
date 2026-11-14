@@ -1,116 +1,119 @@
 from __future__ import annotations
 
 from app.db import Database
+from app.models import REMINDER_CHECK_BACK, STAGE_APPLIED, STAGE_INTERVIEW, STAGE_OFFER
 
 
-def _mk(mid: str, *, stage="application", company="Acme", date_ts=0, needs_action=0,
-        subject="subj", snippet="", reason="") -> dict:
-    return {
-        "id": mid,
-        "thread_id": f"t-{mid}",
-        "subject": subject,
-        "from_name": "",
-        "from_email": f"x@{company.lower().replace(' ', '')}.com",
-        "from_domain": f"{company.lower().replace(' ', '')}.com",
-        "date_ts": date_ts,
-        "snippet": snippet,
-        "labels": [],
-        "stage": stage,
-        "company": company,
-        "role": "",
-        "needs_action": needs_action,
-        "action_reason": reason,
-    }
-
-
-def _user(db, google_id="u1", email="a@example.com") -> int:
+def _user(db: Database, google_id: str = "u1", email: str = "a@example.com") -> int:
     return db.get_or_create_user(google_id, email)
 
 
-def test_user_and_token_crud(tmp_path):
+def _app(db: Database, uid: int, company: str = "Acme", **fields) -> dict:
+    data = {
+        "company": company,
+        "role": "Software Intern",
+        "stage": STAGE_APPLIED,
+        "check_back_at": 1_800_000_000_000,
+        "next_action": "Wait for a response",
+    }
+    data.update(fields)
+    return db.create_application(uid, data)
+
+
+def test_user_roundtrip_and_isolation(tmp_path):
     db = Database(tmp_path / "t.db")
     uid = _user(db)
     assert db.get_user(uid)["email"] == "a@example.com"
-    # Same google id -> same user.
-    assert _user(db) == uid
+    assert _user(db, "u1", "new@example.com") == uid
+    assert db.get_user(uid)["email"] == "new@example.com"
 
-    db.save_oauth_token(uid, "acc-enc", "ref-enc", 123456789)
-    row = db.get_oauth_token(uid)
-    assert row["access_token"] == "acc-enc"
-    assert row["refresh_token"] == "ref-enc"
+    other = _user(db, "u2", "b@example.com")
+    _app(db, uid, "Acme")
+    assert len(db.list_applications(uid)) == 1
+    assert db.list_applications(other) == []
 
 
-def test_upsert_and_counts(tmp_path):
+def test_application_crud_and_filters(tmp_path):
     db = Database(tmp_path / "t.db")
     uid = _user(db)
-    assert db.upsert_message(uid, _mk("a", stage="application")) is True
-    assert db.upsert_message(uid, _mk("b", stage="interview")) is True
-    assert db.upsert_message(uid, _mk("c", stage="offer")) is True
-    # duplicate id -> update, not insert
-    assert db.upsert_message(uid, _mk("a", stage="offer")) is False
+    first = _app(db, uid, "Acme", stage=STAGE_INTERVIEW)
+    second = _app(db, uid, "Beta", stage=STAGE_OFFER)
 
-    counts = db.stage_counts(uid)
-    assert counts["application"] == 0
-    assert counts["offer"] == 2
-    assert counts["total"] == 3
+    assert [row["id"] for row in db.list_applications(uid, stage=STAGE_INTERVIEW)] == [first["id"]]
+    assert [row["id"] for row in db.list_applications(uid, q="beta")] == [second["id"]]
+
+    updated = db.update_application(uid, first["id"], {"company": "Acme Corp", "notes": "hello"})
+    assert updated["company"] == "Acme Corp"
+    assert updated["notes"] == "hello"
+
+    counts = db.stats(uid)["by_stage"]
+    assert counts[STAGE_INTERVIEW] == 1
+    assert counts[STAGE_OFFER] == 1
+
+    db.delete_application(uid, first["id"])
+    assert db.get_application(uid, first["id"]) is None
 
 
-def test_filters_and_search(tmp_path):
+def test_stats_due_and_upcoming(tmp_path):
     db = Database(tmp_path / "t.db")
     uid = _user(db)
-    db.upsert_message(uid, _mk("1", stage="interview", company="Acme", subject="Phone screen"))
-    db.upsert_message(uid, _mk("2", stage="rejection", company="Beta", subject="Update"))
+    _app(db, uid, "Due", check_back_at=100)
+    _app(db, uid, "Later", check_back_at=9_999_999_999_999)
+    stats = db.stats(uid, now=1_000)
+    assert stats["total"] == 2
+    assert stats["active"] == 2
+    assert stats["due"] == 1
+    assert stats["upcoming"] == 1
 
-    assert [m["id"] for m in db.get_messages(uid, stage="interview")] == ["1"]
-    assert [m["id"] for m in db.get_messages(uid, company="Beta")] == ["2"]
-    assert [m["id"] for m in db.get_messages(uid, search="phone")] == ["1"]
 
-
-def test_override_and_followups(tmp_path):
+def test_reminders_and_events(tmp_path):
     db = Database(tmp_path / "t.db")
     uid = _user(db)
-    db.upsert_message(uid, _mk("1", stage="application", needs_action=1, reason="please respond"))
+    app_row = _app(db, uid)
+    reminder = db.add_reminder(
+        uid,
+        app_row["id"],
+        {"kind": REMINDER_CHECK_BACK, "due_at": 123, "title": "Check in"},
+    )
+    assert reminder["payload"] == {}
+    assert len(db.list_reminders(uid)) == 1
 
-    db.set_stage_override(uid, "1", "interview")
-    counts = db.stage_counts(uid)
-    assert counts["interview"] == 1
-    assert counts["application"] == 0
+    db.complete_reminder(uid, reminder["id"])
+    assert db.list_reminders(uid) == []
+    assert db.get_reminder(uid, reminder["id"])["status"] == "done"
 
-    fups = db.followups(uid, older_than_days=0)
-    assert len(fups) == 1
+    event = db.add_event(uid, app_row["id"], "created", {"stage": STAGE_APPLIED})
+    assert event["data"]["stage"] == STAGE_APPLIED
+    assert db.list_events(uid, app_row["id"])[0]["type"] == "created"
 
-    db.clear_action(uid, "1")
-    assert db.followups(uid, older_than_days=0) == []
-    # sync preserves the dismissal
-    db.upsert_message(uid, _mk("1", stage="application", needs_action=1, reason="please respond"))
-    assert db.followups(uid, older_than_days=0) == []
-
-
-def test_user_isolation(tmp_path):
-    db = Database(tmp_path / "t.db")
-    uid1 = _user(db, "g1", "one@example.com")
-    uid2 = _user(db, "g2", "two@example.com")
-    db.upsert_message(uid1, _mk("x", stage="offer", company="Acme"))
-    assert len(db.get_messages(uid1)) == 1
-    assert len(db.get_messages(uid2)) == 0
+    db.delete_application(uid, app_row["id"])
+    assert db.list_events(uid, app_row["id"]) == []
 
 
-def test_company_summary(tmp_path):
+def test_user_settings_merge(tmp_path):
     db = Database(tmp_path / "t.db")
     uid = _user(db)
-    db.upsert_message(uid, _mk("1", stage="offer", company="Acme", date_ts=100))
-    db.upsert_message(uid, _mk("2", stage="application", company="Acme", date_ts=200))
-    db.upsert_message(uid, _mk("3", stage="interview", company="Beta", date_ts=300))
-
-    summary = db.company_summary(uid)
-    by_name = {c["company"]: c for c in summary}
-    assert by_name["Acme"]["message_count"] == 2
-    assert by_name["Acme"]["latest_stage"] == "application"  # most recent
-    assert by_name["Beta"]["latest_stage"] == "interview"
+    assert db.get_user_settings(uid) == {}
+    merged = db.set_user_settings(uid, {"parser_mode": "rules"})
+    assert merged["parser_mode"] == "rules"
+    merged = db.set_user_settings(uid, {"default_follow_up_days": 10})
+    assert merged["parser_mode"] == "rules"
+    assert merged["default_follow_up_days"] == 10
 
 
-def test_meta(tmp_path):
+def test_emails_are_scoped_to_application(tmp_path):
     db = Database(tmp_path / "t.db")
-    assert db.get_meta("last_sync_1") is None
-    db.set_meta("last_sync_1", "2026-01-01")
-    assert db.get_meta("last_sync_1") == "2026-01-01"
+    uid = _user(db)
+    app_row = _app(db, uid)
+    email = db.add_email(
+        uid,
+        app_row["id"],
+        {
+            "subject": "Update",
+            "raw_text": "hello",
+            "parsed": {"stage": STAGE_APPLIED},
+            "confidence": 0.8,
+        },
+    )
+    assert email["parsed"]["stage"] == STAGE_APPLIED
+    assert len(db.list_emails(uid, app_row["id"])) == 1
