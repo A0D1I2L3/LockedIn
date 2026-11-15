@@ -134,6 +134,7 @@ export function Pipeline() {
   const [mode, setMode] = useState<"board" | "list">("board");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [parserText, setParserText] = useState("");
+  const [parseError, setParseError] = useState("");
   const [parsing, setParsing] = useState(false);
   const [draft, setDraft] = useState<ParsedDraft | null>(null);
   const [parserOpen, setParserOpen] = useState(false);
@@ -261,7 +262,11 @@ export function Pipeline() {
   }, []);
 
   async function handleSaved() {
-    await refresh();
+    try {
+      await refresh();
+    } catch {
+      // best-effort
+    }
     try {
       setStatus(await api<StatusPayload>("/api/status"));
       setSettings(await api<SettingsPayload>("/api/settings"));
@@ -284,11 +289,8 @@ export function Pipeline() {
   }
 
   function openPasteDraft() {
-    if (!settings?.preferences?.llm_api_key_set) {
-      setAiPrompt(true);
-      return;
-    }
     setSettingsFocus(null);
+    setParseError("");
     setParserInputOpen(true);
   }
 
@@ -298,6 +300,7 @@ export function Pipeline() {
       return;
     }
     setParsing(true);
+    setParseError("");
     try {
       const result = await api<ParsedDraft>("/api/parse-email", {
         method: "POST",
@@ -308,11 +311,11 @@ export function Pipeline() {
       setParserOpen(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not parse the email.";
+      setParseError(message);
+      notify(message, "error");
       if (/ai provider/i.test(message)) {
         setParserInputOpen(false);
         requestAiSetup();
-      } else {
-        notify(message, "error");
       }
     } finally {
       setParsing(false);
@@ -331,7 +334,7 @@ export function Pipeline() {
           location: draft.location,
           source: "Parsed email",
           stage: draft.stage,
-          applied_at: draft.received_at,
+          applied_at: draft.applied_at ?? draft.received_at,
           check_back_at: draft.check_back_at,
           check_back_source: draft.check_back_source,
           next_action: draft.next_action,
@@ -720,9 +723,17 @@ export function Pipeline() {
       <ParserInputModal
         open={parserInputOpen}
         value={parserText}
-        onChange={setParserText}
+        onChange={(value) => {
+          setParserText(value);
+          if (parseError) setParseError("");
+        }}
         parsing={parsing}
-        onClose={() => setParserInputOpen(false)}
+        error={parseError}
+        aiReady={Boolean(settings?.preferences?.llm_api_key_set)}
+        onClose={() => {
+          setParserInputOpen(false);
+          setParseError("");
+        }}
         onSubmit={runParse}
       />
 
@@ -950,6 +961,8 @@ function ParserInputModal({
   value,
   onChange,
   parsing,
+  error,
+  aiReady,
   onClose,
   onSubmit,
 }: {
@@ -957,6 +970,8 @@ function ParserInputModal({
   value: string;
   onChange: (value: string) => void;
   parsing: boolean;
+  error: string;
+  aiReady: boolean;
   onClose: () => void;
   onSubmit: () => void;
 }) {
@@ -997,6 +1012,12 @@ function ParserInputModal({
             className="min-h-[46vh] w-full resize-y rounded-xl border border-border bg-[#070b13] px-4 py-3 font-mono text-[11.5px] leading-relaxed text-cream/90 placeholder:text-cream-muted/40 focus:border-cyan focus:outline-none"
           />
         </div>
+
+        {(error || !aiReady) && (
+          <div className="mx-6 mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
+            {error || "No AI provider connected yet. Add an API key in Settings before parsing."}
+          </div>
+        )}
 
         <div className="flex items-center justify-between border-t border-border/60 bg-[#090d16] px-6 py-4">
           <span className="text-[10px] text-cream-muted">

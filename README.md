@@ -28,9 +28,9 @@ No Gmail access, no inbox mirroring, and no background mailbox sync.
   email, and the AI provider extracts company, role, stage, next action, and
   response window. Dates like "within 2 weeks", "7–10 business days", and "by
   January 20" become a concrete check-back.
-- **AI provider required** — OpenAI, xAI Grok, or Anthropic Claude. Add the key
-  once in Settings; it is encrypted at rest. Without a key, Paste & Draft
-  prompts you to connect a provider first.
+- **AI provider required** — OpenAI, Groq, xAI Grok, or Anthropic Claude. Add
+  the key once in Settings; it is encrypted at rest. Without a key, Paste &
+  Draft prompts you to connect a provider first.
 - **Reminders** — due check-backs and action deadlines appear in the dashboard,
   can trigger browser notifications, and export to `.ics`.
 - **Multi-user** — Google sign-in is identity only; every query is scoped to
@@ -74,13 +74,16 @@ is configured; there is no mailbox connection step.
 
 ### AI parsing (required for Paste & Draft)
 
-In **Settings → Email parser & LLM**, choose a provider (**OpenAI**, **xAI
-Grok**, or **Anthropic Claude**), then add the API key. Base URL and model are
-pre-filled with that provider's defaults and remain editable for proxies or
+In **Settings → Email parser & LLM**, choose a provider (**OpenAI**, **Groq**,
+**xAI Grok**, or **Anthropic Claude**), then add the API key. Base URL and model
+are pre-filled with that provider's defaults and remain editable for proxies or
 newer models. Parser mode defaults to `llm`, so Paste & Draft calls the provider
-API directly. Clicking Paste & Draft without a key shows a "Connect an AI
-provider first" prompt and opens this settings section. The `auto` mode keeps a
-deterministic rules fallback.
+API directly and asks it for one structured JSON object containing the company,
+role, stage/category, location, next action, check-back date, and deadline.
+Requests use `response_format` JSON schema where supported and fall back to JSON
+object mode; Claude uses `output_config.format`. Clicking Paste & Draft without
+a key shows a "Connect an AI provider first" prompt and opens this settings
+section. The `auto` mode keeps a deterministic rules fallback.
 
 Environment equivalents are `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`,
 `LLM_API_KEY`, and `LLM_TIMEOUT_SECONDS`.

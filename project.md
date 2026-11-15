@@ -20,8 +20,8 @@ Core product decisions:
   editable before or after saving.
 - Classification prefers precision over recall: unknown text becomes
   `applied` with low confidence, never a confident wrong stage.
-- Rules are always available; the LLM is optional and only used when
-  confidence is low (`parser_mode=auto`).
+- Rules are always available. Parser mode defaults to `llm`, so the provider is
+  the primary extractor; `auto` keeps a rules fallback for low confidence.
 - Per-user isolation is enforced in every SQL query via `user_id`.
 - The frontend is React + Tailwind inside the Next.js app; API routes are
   colocated under `app/api/`.
@@ -94,7 +94,7 @@ pending reminders for that application and recreates:
 | `lib/secrets.ts` | AES-256-GCM store for Google secret and per-user LLM keys |
 | `lib/parser/dates.ts` | Relative windows, explicit dates, business days, event dates |
 | `lib/parser/rules.ts` | Stage keywords, company/role regexes, next action |
-| `lib/parser/llm.ts` | Optional JSON-mode LLM call, Zod validation |
+| `lib/parser/llm.ts` | JSON-schema LLM call, fallback JSON mode, Zod validation |
 | `lib/parser/pipeline.ts` | Merge rules + LLM, resolve check-back, return draft |
 | `lib/reminders.ts` | Reminder sync, due/upcoming feeds, snooze |
 | `lib/calendar.ts` | ICS generation, browser notification payload |
@@ -159,12 +159,17 @@ assessment → interview → applied. Company extraction uses explicit patterns
 first, then the sender domain unless it is a known ATS/job-board domain.
 There is no fuzzy company matching.
 
-`llm.parseWithLLM` supports three providers. OpenAI and Grok call
-`{base}/chat/completions` with a bearer token, `temperature=0`, and
-`response_format=json_object`. Claude calls `{base}/messages` with `x-api-key`
-and `anthropic-version`, a top-level `system` prompt, and no response format.
-Responses (including fenced JSON) are validated with Zod. Any
-network/validation failure returns `null`; rules win.
+`llm.parseWithLLM` supports four providers. OpenAI, Groq, and xAI Grok call
+`{base}/chat/completions` with a bearer token, `temperature=0`,
+`max_tokens=1200`, and `response_format` set to a strict JSON schema
+(`json_schema`), falling back to `json_object` when a model rejects schema
+mode. Claude calls `{base}/messages` with `x-api-key`, `anthropic-version`, a
+top-level `system` prompt, and `output_config.format` (`json_schema`).
+The system prompt requires every key: company, role, location, stage/category,
+next action, next-action date, check-back date, deadline, applied date,
+response window, confidence, and evidence. Responses (including fenced JSON)
+are validated with Zod. In `llm` mode failures surface to the UI; in `auto` mode
+they return `null` and rules win.
 
 ## 7. Database schema
 

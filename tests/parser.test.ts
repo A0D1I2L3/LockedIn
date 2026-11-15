@@ -1,8 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { extractResponseWindow, resolveCheckBack } from "@/lib/parser/dates";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { extractResponseWindow, parseDate, resolveCheckBack } from "@/lib/parser/dates";
+import { makeLLMConfig } from "@/lib/parser/llm";
 import { parseEmail } from "@/lib/parser/pipeline";
 
 const ANCHOR = Date.UTC(2026, 10, 1, 12, 0, 0);
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("parser pipeline", () => {
   it("defaults application confirmations to applied with the stated window", async () => {
@@ -120,6 +123,60 @@ describe("parser pipeline", () => {
     expect(draft.role).toBe("Software Engineer");
     expect(draft.check_back_source).toBe("default");
     expect(draft.next_action).toBe("Wait for a response");
+  });
+
+  it("uses the LLM JSON for every field including the check-back date", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  company: "Stripe",
+                  role: "Backend Intern",
+                  location: "Remote",
+                  stage: "interview",
+                  next_action: "Schedule the technical interview",
+                  next_action_date: "2026-11-18",
+                  check_back_date: "2026-11-20",
+                  deadline: null,
+                  applied_date: "2026-10-30",
+                  response_window_days: null,
+                  response_window_business_days: false,
+                  confidence: 0.9,
+                  evidence: ["technical interview"],
+                }),
+              },
+            },
+          ],
+        }),
+      }),
+    );
+
+    const draft = await parseEmail(
+      "Thanks for applying to PayPal. We would like to invite you to a technical interview.",
+      {
+        subject: "Interview invitation",
+        receivedAt: ANCHOR,
+        llmConfig: makeLLMConfig({ provider: "openai", apiKey: "test" }),
+        parserMode: "llm",
+      },
+    );
+
+    expect(draft.parser).toBe("llm");
+    expect(draft.company).toBe("Stripe");
+    expect(draft.role).toBe("Backend Intern");
+    expect(draft.location).toBe("Remote");
+    expect(draft.stage).toBe("interview");
+    expect(draft.next_action).toBe("Schedule the technical interview");
+    expect(draft.check_back_source).toBe("llm");
+    expect(draft.check_back_at).toBe(parseDate("2026-11-20", ANCHOR, "UTC"));
+    expect(draft.next_action_at).toBe(parseDate("2026-11-18", ANCHOR, "UTC"));
+    expect(draft.applied_at).toBe(parseDate("2026-10-30", ANCHOR, "UTC"));
   });
 
   it("takes a company from the sender domain but not from an ATS", async () => {

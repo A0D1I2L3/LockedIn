@@ -13,7 +13,7 @@ const sectionTitleClass =
 
 const PROVIDER_DEFAULTS: Record<string, { baseUrl: string; model: string }> = {
   openai: { baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
-  groq: { baseUrl: "https://api.groq.com/openai/v1", model: "llama-3.3-70b-versatile" },
+  groq: { baseUrl: "https://api.groq.com/openai/v1", model: "openai/gpt-oss-120b" },
   grok: { baseUrl: "https://api.x.ai/v1", model: "grok-3-mini" },
   claude: { baseUrl: "https://api.anthropic.com/v1", model: "claude-sonnet-4-5" },
 };

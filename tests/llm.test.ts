@@ -54,6 +54,8 @@ describe("LLM providers", () => {
     expect(payload.system).toBeTruthy();
     expect(payload.messages[0].role).toBe("user");
     expect(payload.response_format).toBeUndefined();
+    expect(payload.output_config.format.type).toBe("json_schema");
+    expect(payload.output_config.format.schema.required).toContain("check_back_date");
   });
 
   it("sends an OpenAI-compatible request", async () => {
@@ -61,7 +63,8 @@ describe("LLM providers", () => {
       choices: [
         {
           message: {
-            content: '{"company": "Globex", "stage": "applied", "confidence": 0.7, "evidence": []}',
+            content:
+              '{"company": "Globex", "stage": "applied", "check_back_date": "2026-12-01", "confidence": 0.7, "evidence": []}',
           },
         },
       ],
@@ -71,10 +74,14 @@ describe("LLM providers", () => {
       config: makeLLMConfig({ provider: "grok", apiKey: "xai-test" }),
     });
     expect(result?.company).toBe("Globex");
+    expect(result?.check_back_date).toBe("2026-12-01");
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.x.ai/v1/chat/completions");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer xai-test");
-    expect(JSON.parse(init.body as string).response_format).toEqual({ type: "json_object" });
+    const responseFormat = JSON.parse(init.body as string).response_format;
+    expect(responseFormat.type).toBe("json_schema");
+    expect(responseFormat.json_schema.strict).toBe(true);
+    expect(responseFormat.json_schema.schema.required).toContain("company");
   });
 
   it("skips the request when there is no API key", async () => {
@@ -85,10 +92,36 @@ describe("LLM providers", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("falls back to JSON object mode when a provider rejects JSON schema", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        text: async () => 'response_format: json_schema is not supported for this model',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: '{"company": "Initech", "stage": "applied"}' } }],
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await parseWithLLM("Thanks for applying.", {
+      config: makeLLMConfig({ provider: "groq", apiKey: "test" }),
+    });
+    expect(result?.company).toBe("Initech");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [, retryInit] = fetchMock.mock.calls[1];
+    expect(JSON.parse(retryInit.body as string).response_format).toEqual({ type: "json_object" });
+  });
+
   it("surfaces provider failures in strict mode", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) }),
+      vi.fn().mockResolvedValue({ ok: false, status: 401, text: async () => "bad key" }),
     );
     await expect(
       parseWithLLM("text", {
