@@ -9,7 +9,7 @@ import {
 } from "@/lib/api";
 import { getConfig } from "@/lib/config";
 import { getDb } from "@/lib/db";
-import { isOAuthConfigured, oauthCredentials } from "@/lib/oauth";
+import { isOAuthConfigured } from "@/lib/oauth";
 import { secretStore } from "@/lib/secrets";
 import { preferencesInputSchema } from "@/lib/schemas";
 
@@ -20,14 +20,10 @@ export async function GET(req: NextRequest) {
     const config = getConfig();
     const db = getDb();
     const userId = optionalUserId(req);
-    const credentials = oauthCredentials();
     const payload: Record<string, unknown> = {
       configured: isOAuthConfigured(),
-      client_id: credentials.clientId || "",
-      client_secret_set: Boolean(credentials.clientSecret),
       base_url: config.baseUrl,
       redirect_uri: config.redirectUri,
-      oauth_redirect_uri: config.redirectUri,
     };
     if (userId !== null) {
       const prefs = userSettings(db, userId);
@@ -49,11 +45,6 @@ export async function POST(req: NextRequest) {
     const db = getDb();
     const userId = optionalUserId(req);
     const body = await readBody(req, preferencesInputSchema);
-
-    const toStore: Record<string, string> = {};
-    if (body.client_id) toStore.google_client_id = body.client_id.trim();
-    if (body.client_secret) toStore.google_client_secret = body.client_secret.trim();
-    if (Object.keys(toStore).length) secretStore.setMany(toStore);
 
     if (userId !== null) {
       const values: Record<string, unknown> = {};

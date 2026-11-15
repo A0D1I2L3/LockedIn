@@ -49,8 +49,8 @@ npm run build
 
 Config is environment-first (Next loads `.env`). User preferences (parser mode,
 timezone, default follow-up days, LLM provider/base/model, notifications) live
-in `user_settings`. Secrets are global OAuth credentials plus per-user LLM keys
-in the encrypted store.
+in `user_settings`. Google OAuth credentials come from environment variables;
+per-user LLM keys live in the encrypted store.
 
 ## 3. Data flow
 
@@ -190,7 +190,7 @@ database was intentionally not migrated.
 |---|---|
 | `GET /api/health` | liveness |
 | `GET /api/me`, `GET /api/status` | session + counts |
-| `GET/POST /api/settings` | OAuth client, user prefs, LLM config |
+| `GET/POST /api/settings` | User prefs and LLM config |
 | `GET /oauth/login`, `GET /oauth/callback` | identity flow |
 | `POST /api/logout` | clear cookie |
 | `GET/POST /api/applications` | list/filter/create |

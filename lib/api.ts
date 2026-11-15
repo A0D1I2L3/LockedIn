@@ -69,7 +69,7 @@ export async function readBody<T>(req: NextRequest, schema: ZodType<T>): Promise
 export function userSettings(db: Database, userId: number): UserPreferences {
   const config = getConfig();
   return {
-    parser_mode: "auto",
+    parser_mode: "llm",
     default_follow_up_days: config.defaultFollowUpDays,
     timezone: config.appTimezone,
     notifications_enabled: true,

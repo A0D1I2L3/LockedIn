@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/client";
-import { SettingsModal } from "@/components/SettingsModal";
 import { Icon } from "@/components/ui";
 
 interface StatusPayload {
@@ -38,7 +37,6 @@ export function Landing() {
   const router = useRouter();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [status, setStatus] = useState<StatusPayload | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -50,11 +48,6 @@ export function Landing() {
         setStatus(payload);
         if (payload.authenticated) {
           router.replace("/app");
-          return;
-        }
-        if (new URLSearchParams(window.location.search).get("settings") === "1") {
-          setSettingsOpen(true);
-          window.history.replaceState({}, "", "/");
         }
       })
       .catch(() => {
@@ -162,9 +155,8 @@ export function Landing() {
   function startSignIn() {
     setConnecting(true);
     if (status && !status.oauth_configured) {
-      setSettingsOpen(true);
       setConnecting(false);
-      setToast("Add your Google OAuth client ID and secret to continue.");
+      setToast("Google sign-in is not configured on this deployment.");
       return;
     }
     window.location.href = "/oauth/login";
@@ -178,13 +170,6 @@ export function Landing() {
         <div className="absolute -bottom-40 left-1/3 h-80 w-80 rounded-full bg-[#FF95A5]/10 blur-[140px]" />
       </div>
 
-      <button
-        onClick={() => setSettingsOpen(true)}
-        className="absolute right-5 top-5 z-20 inline-flex items-center gap-1.5 rounded-full border border-outline-variant/40 bg-surface-container-high/60 px-3 py-1.5 text-[11px] font-semibold text-text-secondary backdrop-blur-md transition hover:border-cyan/50 hover:text-cream sm:right-8 sm:top-8"
-      >
-        <Icon name="settings" className="text-[15px]" /> Setup
-      </button>
-
       <main className="relative z-10 flex min-h-screen w-full flex-col items-center justify-center overflow-hidden px-4 py-10 select-none sm:px-6 md:px-10">
         <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 z-0 h-full w-full" />
 
@@ -194,12 +179,12 @@ export function Landing() {
         <div className="animate-rise-in relative z-10 flex w-full max-w-2xl flex-col items-center rounded-[2.5rem] border border-outline-variant/30 bg-surface-container-lowest/70 p-8 text-center shadow-[0_20px_60px_-15px_rgba(13,17,28,0.85)] backdrop-blur-2xl sm:p-12 md:p-16">
           <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-outline-variant/40 bg-surface-container-high/80 px-3.5 py-1.5 shadow-sm backdrop-blur-md">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan" />
-            <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-on-surface-variant">
+            <span className="text-[9px] font-bold uppercase tracking-[0.22em] text-on-surface-variant">
               Career Telemetry • Private Auth
             </span>
           </div>
 
-          <h1 className="mb-5 bg-gradient-to-r from-[#FFF6DC] via-[#76C0EC] to-[#425B9A] bg-clip-text font-display text-[46px] font-bold leading-[1.05] tracking-[-0.03em] text-transparent sm:text-[54px] sm:leading-[62px]">
+          <h1 className="mb-5 bg-gradient-to-r from-[#FFF6DC] via-[#76C0EC] to-[#425B9A] bg-clip-text font-display text-[39px] font-bold leading-[1.05] tracking-[-0.03em] text-transparent sm:text-[46px] sm:leading-[62px]">
             LockedIn
           </h1>
 
@@ -208,8 +193,8 @@ export function Landing() {
             recruitment velocity.
           </p>
 
-          <p className="mb-10 flex max-w-md items-center justify-center gap-1.5 text-[13px] leading-5 text-[#b5c1d6]">
-            <Icon name="verified_user" className="text-[16px] text-cyan" />
+          <p className="mb-10 flex max-w-md items-center justify-center gap-1.5 text-[12px] leading-5 text-[#b5c1d6]">
+            <Icon name="verified_user" className="text-[14px] text-cyan" />
             Google Sign-in used solely for identity verification; never reads or stores your emails.
           </p>
 
@@ -236,35 +221,18 @@ export function Landing() {
           </div>
 
           {status && !status.oauth_configured && (
-            <button
-              onClick={() => setSettingsOpen(true)}
-              className="mt-4 text-[11px] font-semibold text-cyan/80 underline-offset-4 hover:text-cyan hover:underline"
-            >
-              Google OAuth setup required — add credentials
-            </button>
+            <p className="mt-4 text-[10px] font-semibold text-[#FF95A5]/80">
+              Google sign-in is not configured on this deployment.
+            </p>
           )}
 
-          <div className="mt-8 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-outline">
+          <div className="mt-8 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-outline">
             <span className="text-[#b5c1d6]/80">Secure enclave active</span>
             <span className="text-[#FF95A5]/60">•</span>
             <span className="text-[#b5c1d6]/80">Zero log retention</span>
           </div>
         </div>
       </main>
-
-      <SettingsModal
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        authenticated={false}
-        onSaved={async () => {
-          try {
-            setStatus(await api<StatusPayload>("/api/status"));
-          } catch {
-            // status refresh is best-effort
-          }
-        }}
-        notify={(message) => setToast(message)}
-      />
 
       {toast && (
         <div className="pointer-events-none fixed bottom-5 left-1/2 z-[70] -translate-x-1/2 rounded-xl border border-cyan/30 bg-surface/95 px-4 py-2 text-xs font-medium text-cream shadow-2xl backdrop-blur-xl">

@@ -24,12 +24,13 @@ No Gmail access, no inbox mirroring, and no background mailbox sync.
 - **Manual pipeline** — add a company/role once, then record outcomes
   (`rejected`, `offer`, `assessment`, `interview`, `followed up`,
   `no response`, `withdrawn`) as they happen.
-- **Paste an email, get a draft** — a rules parser extracts company, role,
-  stage, next action, and response window. Dates like "within 2 weeks",
-  "7–10 business days", and "by January 20" become a concrete check-back.
-- **Optional LLM fallback** — OpenAI, xAI Grok, or Anthropic Claude can fill
-  gaps when the rules are unsure. It is opt-in and the API key is encrypted at
-  rest.
+- **Paste an email, get a draft** — click **Paste & Draft**, paste the full
+  email, and the AI provider extracts company, role, stage, next action, and
+  response window. Dates like "within 2 weeks", "7–10 business days", and "by
+  January 20" become a concrete check-back.
+- **AI provider required** — OpenAI, xAI Grok, or Anthropic Claude. Add the key
+  once in Settings; it is encrypted at rest. Without a key, Paste & Draft
+  prompts you to connect a provider first.
 - **Reminders** — due check-backs and action deadlines appear in the dashboard,
   can trigger browser notifications, and export to `.ics`.
 - **Multi-user** — Google sign-in is identity only; every query is scoped to
@@ -44,7 +45,7 @@ No Gmail access, no inbox mirroring, and no background mailbox sync.
 | Styling  | Tailwind CSS v4 |
 | Auth     | Google OAuth (`openid`/`email`/`profile` only) |
 | Storage  | SQLite via `node:sqlite` `DatabaseSync` |
-| Parser   | Deterministic rules + optional OpenAI/Grok/Claude |
+| Parser   | OpenAI/Grok/Claude (rules fallback available) |
 | Tests    | Vitest |
 
 ## Run it locally
@@ -65,20 +66,21 @@ clean slate, stop the server and delete the `data/` directory.
 2. Configure the OAuth consent screen (External is fine for testing).
 3. Create an OAuth **Web application** client.
 4. Add the redirect URI `http://localhost:3000/oauth/callback`.
-5. Open the app → **Settings** → paste the client ID/secret. No Gmail API or
-   Gmail scopes are needed.
+5. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in your environment (or
+   `.env`). No Gmail API or Gmail scopes are needed.
 
 If you only want to try the tracker locally, the app still works after sign-in
 is configured; there is no mailbox connection step.
 
-### Optional LLM parsing
+### AI parsing (required for Paste & Draft)
 
-In **Settings**, choose a provider (**OpenAI**, **xAI Grok**, or **Anthropic
-Claude**), then add the API key. Base URL and model are pre-filled with that
-provider's defaults and remain editable for proxies or newer models. Parser
-mode defaults to `auto`: rules run first, and the LLM is only called when
-confidence is below 65%. Failures fall back to the rules result. Use `rules`
-for a fully local app.
+In **Settings → Email parser & LLM**, choose a provider (**OpenAI**, **xAI
+Grok**, or **Anthropic Claude**), then add the API key. Base URL and model are
+pre-filled with that provider's defaults and remain editable for proxies or
+newer models. Parser mode defaults to `llm`, so Paste & Draft calls the provider
+API directly. Clicking Paste & Draft without a key shows a "Connect an AI
+provider first" prompt and opens this settings section. The `auto` mode keeps a
+deterministic rules fallback.
 
 Environment equivalents are `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`,
 `LLM_API_KEY`, and `LLM_TIMEOUT_SECONDS`.
@@ -134,7 +136,7 @@ Environment equivalents are `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`,
 | `GET /api/stats` | Pipeline totals |
 | `GET /api/reminders`, `PATCH /api/reminders/{id}?action=done\|dismiss` | List/complete reminders |
 | `GET /api/calendar.ics` | Full ICS export |
-| `GET/POST /api/settings` | OAuth client, parser, timezone, notifications |
+| `GET/POST /api/settings` | Parser, timezone, LLM, notifications |
 | `GET /oauth/login`, `GET /oauth/callback` | Google identity flow |
 | `POST /api/logout` | Clear the session cookie |
 

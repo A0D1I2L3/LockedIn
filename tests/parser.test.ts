@@ -69,6 +69,59 @@ describe("parser pipeline", () => {
     expect(days).toBeLessThan(6);
   });
 
+  it("keeps an application-received email at applied when an assessment is only future work", async () => {
+    const draft = await parseEmail(
+      "Hi Adil,\n\nWe greatly appreciate your interest in Software Development Engineer " +
+        "Intern role at HackerRank. Your application has been received, and we're excited " +
+        "to move forward with our selection process.\n\nOur team will carefully review your " +
+        "application within 1 week. If you are shortlisted, you will receive a take-home " +
+        "assignment as the next step in the process.\n\nIf you do not hear from us within " +
+        "this timeframe, it means we are unable to proceed with your application at this " +
+        "time. However, we will keep your resume on file and reach out should a future " +
+        "opportunity arise that aligns with your skills and interests.\n\nWe invite you to " +
+        "stay connected with us on LinkedIn and HackerRank Instagram. Want more insights " +
+        'into life at HackerRank? Follow our LifeatHackerRank Instagram page!\n\nAlso, don’t ' +
+        'miss "What’s new on HackerRank!"\n\nThank you again for considering HackerRank, and ' +
+        "we wish you the best of luck in your application process.\n\nThank you,\n" +
+        "HackerRank Talent Team",
+      {
+        subject: "Your application to HackerRank",
+        fromEmail: "no-reply@hackerrank.com",
+        receivedAt: ANCHOR,
+      },
+    );
+    expect(draft.stage).toBe("applied");
+    expect(draft.company).toBe("HackerRank");
+    expect(draft.role).toBe("Software Development Engineer Intern");
+    expect(draft.check_back_source).toBe("stated_window");
+    const days = (draft.check_back_at! - ANCHOR) / 86_400_000;
+    expect(days).toBeGreaterThan(6);
+    expect(days).toBeLessThan(8);
+    expect(draft.action_state).toBe("waiting");
+  });
+
+  it("parses a high-volume application confirmation with the default check-back", async () => {
+    const draft = await parseEmail(
+      "Hello Adil,\n\nThank you for your application for the Software Engineer role and " +
+        "for your interest in joining our team.\n\nWe are currently reviewing applications " +
+        "and appreciate the time and effort you have taken to apply. Due to the high volume " +
+        "of applications, we will be progressing with candidates whose experience and skills " +
+        "most closely match the requirements of the role. If your application is shortlisted, " +
+        "a member of our team will be in touch.\n\nBest Regards,\nPayPal Global Talent " +
+        "Acquisition Team",
+      {
+        subject: "Thank you for your application",
+        fromEmail: "jobs@paypal.com",
+        receivedAt: ANCHOR,
+      },
+    );
+    expect(draft.stage).toBe("applied");
+    expect(draft.company).toBe("Paypal");
+    expect(draft.role).toBe("Software Engineer");
+    expect(draft.check_back_source).toBe("default");
+    expect(draft.next_action).toBe("Wait for a response");
+  });
+
   it("takes a company from the sender domain but not from an ATS", async () => {
     const direct = await parseEmail("Your application has been received.", {
       fromEmail: "careers@paypal.com",

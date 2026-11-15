@@ -207,23 +207,23 @@ export function DetailModal({
             <div className="space-y-5 px-5 py-4">
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-xl border border-surface-border bg-surface-container-low p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-tertiary">Next action</p>
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-text-tertiary">Next action</p>
                   <p className="mt-1 text-xs font-medium text-text-primary">{application?.next_action || "None"}</p>
-                  <p className={`mt-1 text-[11px] ${application?.action_state === "action_required" ? "text-signal-warning" : "text-text-tertiary"}`}>
+                  <p className={`mt-1 text-[10px] ${application?.action_state === "action_required" ? "text-signal-warning" : "text-text-tertiary"}`}>
                     {application?.next_action_at ? `${fmtDate(application.next_action_at)} · ${relative(application.next_action_at)}` : "No date"}
                   </p>
                 </div>
                 <div className="rounded-xl border border-surface-border bg-surface-container-low p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-tertiary">Check back</p>
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-text-tertiary">Check back</p>
                   <p className={`mt-1 text-xs font-medium ${meta?.text || ""}`}>
                     {application?.check_back_at ? `${fmtDate(application.check_back_at)} · ${relative(application.check_back_at)}` : "—"}
                   </p>
-                  <p className="mt-1 text-[11px] text-text-tertiary">{application?.check_back_source || "none"}</p>
+                  <p className="mt-1 text-[10px] text-text-tertiary">{application?.check_back_source || "none"}</p>
                 </div>
                 <div className="rounded-xl border border-surface-border bg-surface-container-low p-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-text-tertiary">Applied</p>
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-text-tertiary">Applied</p>
                   <p className="mt-1 text-xs font-medium text-text-primary">{fmtDate(application?.applied_at)}</p>
-                  <p className="mt-1 text-[11px] text-text-tertiary">{application?.follow_up_count || 0} follow-ups</p>
+                  <p className="mt-1 text-[10px] text-text-tertiary">{application?.follow_up_count || 0} follow-ups</p>
                 </div>
               </div>
 
@@ -243,10 +243,10 @@ export function DetailModal({
                   onClick={() => application && onEdit(application)}
                   className="inline-flex items-center gap-1 rounded-lg border border-surface-border px-2.5 py-1.5 text-xs text-text-secondary hover:bg-surface-container-high"
                 >
-                  <Icon name="edit" className="text-[15px]" /> Edit
+                  <Icon name="edit" className="text-[13px]" /> Edit
                 </button>
                 <div className="inline-flex items-center gap-1 rounded-lg border border-surface-border px-2 py-1 text-xs text-text-secondary">
-                  <Icon name="snooze" className="text-[15px]" />
+                  <Icon name="snooze" className="text-[13px]" />
                   {[1, 3, 7].map((days) => (
                     <button key={days} type="button" onClick={() => snooze(days)} disabled={Boolean(busy)} className="rounded px-1.5 py-0.5 hover:bg-surface-container-high disabled:opacity-50">
                       {busy === `snooze-${days}` ? "…" : `+${days}d`}
@@ -257,17 +257,17 @@ export function DetailModal({
                   href={`/api/applications/${application?.id}/calendar.ics`}
                   className="inline-flex items-center gap-1 rounded-lg border border-surface-border px-2.5 py-1.5 text-xs text-text-secondary hover:bg-surface-container-high"
                 >
-                  <Icon name="calendar_month" className="text-[15px]" /> ICS
+                  <Icon name="calendar_month" className="text-[13px]" /> ICS
                 </a>
                 {application?.job_url && (
                   <a href={application.job_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-surface-border px-2.5 py-1.5 text-xs text-text-secondary hover:bg-surface-container-high">
-                    <Icon name="open_in_new" className="text-[15px]" /> Job post
+                    <Icon name="open_in_new" className="text-[13px]" /> Job post
                   </a>
                 )}
               </div>
 
               <div>
-                <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-text-tertiary">Log an outcome</p>
+                <p className="mb-2 text-[9px] font-semibold uppercase tracking-[0.16em] text-text-tertiary">Log an outcome</p>
                 <div className="flex flex-wrap gap-1.5">
                   {OUTCOME_BUTTONS.map((button) => (
                     <button
@@ -275,9 +275,9 @@ export function DetailModal({
                       type="button"
                       onClick={() => logOutcome(button.value)}
                       disabled={Boolean(busy)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-surface-border bg-surface-container-low px-2.5 py-1.5 text-[11px] text-text-secondary transition hover:border-primary/40 hover:text-text-primary disabled:opacity-50"
+                      className="inline-flex items-center gap-1 rounded-lg border border-surface-border bg-surface-container-low px-2.5 py-1.5 text-[10px] text-text-secondary transition hover:border-primary/40 hover:text-text-primary disabled:opacity-50"
                     >
-                      <Icon name={button.icon} className="text-[14px]" />
+                      <Icon name={button.icon} className="text-[12.5px]" />
                       {busy === button.value ? "…" : button.label}
                     </button>
                   ))}
@@ -286,9 +286,9 @@ export function DetailModal({
 
               <div className="rounded-xl border border-surface-border bg-surface-container-low">
                 <button type="button" onClick={() => setEmailPanel((value) => !value)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left">
-                  <Icon name="mail" className="text-[18px] text-primary" />
+                  <Icon name="mail" className="text-[16px] text-primary" />
                   <span className="flex-1 text-xs font-semibold text-text-primary">Paste a new email</span>
-                  <Icon name={emailPanel ? "expand_less" : "expand_more"} className="text-[18px] text-text-tertiary" />
+                  <Icon name={emailPanel ? "expand_less" : "expand_more"} className="text-[16px] text-text-tertiary" />
                 </button>
                 {emailPanel && (
                   <div className="space-y-2 border-t border-surface-border px-3 py-3">
@@ -311,7 +311,7 @@ export function DetailModal({
 
               {application?.notes && (
                 <div>
-                  <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-text-tertiary">Notes</p>
+                  <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-text-tertiary">Notes</p>
                   <pre className="whitespace-pre-wrap rounded-xl border border-surface-border bg-surface-container-low p-3 font-sans text-xs leading-relaxed text-text-secondary">
                     {application.notes}
                   </pre>
@@ -319,7 +319,7 @@ export function DetailModal({
               )}
 
               <div>
-                <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-text-tertiary">
+                <p className="mb-2 text-[9px] font-semibold uppercase tracking-[0.16em] text-text-tertiary">
                   Timeline · {events.length} events · {emails.length} emails
                 </p>
                 <div className="space-y-1">
@@ -330,9 +330,9 @@ export function DetailModal({
                       <div className="min-w-0 flex-1">
                         <div className="flex items-baseline justify-between gap-2">
                           <p className="text-xs font-medium capitalize text-text-primary">{event.type}</p>
-                          <span className="shrink-0 text-[10px] text-text-tertiary">{fmtDateTime(event.created_at)}</span>
+                          <span className="shrink-0 text-[9px] text-text-tertiary">{fmtDateTime(event.created_at)}</span>
                         </div>
-                        <p className="truncate text-[11px] text-text-tertiary">
+                        <p className="truncate text-[10px] text-text-tertiary">
                           {Object.entries(event.data || {})
                             .filter(([, value]) => value !== null && value !== "")
                             .slice(0, 4)
@@ -348,9 +348,9 @@ export function DetailModal({
                       <div className="min-w-0 flex-1">
                         <div className="flex items-baseline justify-between gap-2">
                           <p className="truncate text-xs font-medium text-text-primary">{email.subject || "(no subject)"}</p>
-                          <span className="shrink-0 text-[10px] text-text-tertiary">{fmtDate(email.received_at)}</span>
+                          <span className="shrink-0 text-[9px] text-text-tertiary">{fmtDate(email.received_at)}</span>
                         </div>
-                        <p className="truncate text-[11px] text-text-tertiary">
+                        <p className="truncate text-[10px] text-text-tertiary">
                           {email.from_email || "unknown sender"} · {Math.round(email.confidence * 100)}% · {email.parser_version}
                         </p>
                       </div>

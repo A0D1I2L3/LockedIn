@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/client";
 import type {
@@ -19,6 +19,7 @@ import {
   CompanyAvatar,
   EmptyState,
   Icon,
+  Modal,
   SpinnerLabel,
   StageBadge,
   fmtDate,
@@ -136,8 +137,11 @@ export function Pipeline() {
   const [parsing, setParsing] = useState(false);
   const [draft, setDraft] = useState<ParsedDraft | null>(null);
   const [parserOpen, setParserOpen] = useState(false);
+  const [parserInputOpen, setParserInputOpen] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsFocus, setSettingsFocus] = useState<"ai" | null>(null);
+  const [aiPrompt, setAiPrompt] = useState(false);
   const [cadenceOpen, setCadenceOpen] = useState(false);
   const [appModalOpen, setAppModalOpen] = useState(false);
   const [editing, setEditing] = useState<Application | null>(null);
@@ -157,31 +161,42 @@ export function Pipeline() {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const maybeNotify = useCallback(
-    (items: NotificationItem[]) => {
-      if (typeof window === "undefined" || !("Notification" in window)) return;
-      if (Notification.permission !== "granted") return;
-      if (settings?.preferences && settings.preferences.notifications_enabled === false) return;
-      for (const item of items) {
-        const key = `lockedin-notified:${item.application_id}:${item.reminder_id || item.kind}:${item.due_at}`;
-        try {
-          if (window.localStorage.getItem(key)) continue;
-          window.localStorage.setItem(key, "1");
-        } catch {
-          // ignore storage failures
-        }
-        const options = { body: item.body || item.role, tag: key, icon: "/icon.svg" };
-        if ("serviceWorker" in navigator) {
-          void navigator.serviceWorker.ready
-            .then((registration) => registration.showNotification(item.title, options))
-            .catch(() => new Notification(item.title, options));
-        } else {
-          new Notification(item.title, options);
-        }
+  useEffect(() => {
+    if (!aiPrompt) return;
+    const timer = setTimeout(() => setAiPrompt(false), 6000);
+    return () => clearTimeout(timer);
+  }, [aiPrompt]);
+
+  const settingsRef = useRef<SettingsPayload | null>(null);
+  settingsRef.current = settings;
+
+  const maybeNotify = useCallback((items: NotificationItem[]) => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (Notification.permission !== "granted") return;
+    if (
+      settingsRef.current?.preferences &&
+      settingsRef.current.preferences.notifications_enabled === false
+    ) {
+      return;
+    }
+    for (const item of items) {
+      const key = `lockedin-notified:${item.application_id}:${item.reminder_id || item.kind}:${item.due_at}`;
+      try {
+        if (window.localStorage.getItem(key)) continue;
+        window.localStorage.setItem(key, "1");
+      } catch {
+        // ignore storage failures
       }
-    },
-    [settings],
-  );
+      const options = { body: item.body || item.role, tag: key, icon: "/icon.svg" };
+      if ("serviceWorker" in navigator) {
+        void navigator.serviceWorker.ready
+          .then((registration) => registration.showNotification(item.title, options))
+          .catch(() => new Notification(item.title, options));
+      } else {
+        new Notification(item.title, options);
+      }
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     const [appsResponse, statsResponse, feedResponse] = await Promise.all([
@@ -262,6 +277,21 @@ export function Pipeline() {
     setAppModalOpen(true);
   }
 
+  function requestAiSetup() {
+    setAiPrompt(true);
+    setSettingsFocus("ai");
+    setSettingsOpen(true);
+  }
+
+  function openPasteDraft() {
+    if (!settings?.preferences?.llm_api_key_set) {
+      setAiPrompt(true);
+      return;
+    }
+    setSettingsFocus(null);
+    setParserInputOpen(true);
+  }
+
   async function runParse() {
     if (!parserText.trim()) {
       notify("Paste a recruiter email first.", "error");
@@ -271,12 +301,19 @@ export function Pipeline() {
     try {
       const result = await api<ParsedDraft>("/api/parse-email", {
         method: "POST",
-        body: { raw_text: parserText },
+        body: { raw_text: parserText, parser_mode: "llm" },
       });
+      setParserInputOpen(false);
       setDraft(result);
       setParserOpen(true);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Could not parse the email.", "error");
+      const message = error instanceof Error ? error.message : "Could not parse the email.";
+      if (/ai provider/i.test(message)) {
+        setParserInputOpen(false);
+        requestAiSetup();
+      } else {
+        notify(message, "error");
+      }
     } finally {
       setParsing(false);
     }
@@ -397,49 +434,48 @@ export function Pipeline() {
 
   return (
     <div className="min-h-screen bg-base text-cream">
+      {aiPrompt && (
+        <div className="fixed left-1/2 top-4 z-[80] w-[min(94vw,460px)] -translate-x-1/2 animate-rise-in">
+          <div className="flex items-center gap-3 rounded-xl border border-cyan/40 bg-[#0c101b]/95 px-4 py-3 shadow-2xl backdrop-blur-xl">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-cyan/30 bg-cyan/10 text-cyan">
+              <Icon name="key" className="text-[16px]" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold text-cream">Connect an AI provider first</p>
+              <p className="text-[10px] text-cream-muted">
+                Paste &amp; Draft needs an API key to read emails.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setSettingsFocus("ai");
+                setSettingsOpen(true);
+                setAiPrompt(false);
+              }}
+              className="shrink-0 rounded-lg bg-cyan px-3 py-1.5 text-[10px] font-semibold text-[#07131b] transition hover:bg-cyan/90"
+            >
+              Open settings
+            </button>
+            <button
+              onClick={() => setAiPrompt(false)}
+              aria-label="Dismiss"
+              className="shrink-0 rounded-lg p-1 text-cream-muted transition hover:bg-white/5 hover:text-cream"
+            >
+              <Icon name="close" className="text-[14px]" />
+            </button>
+          </div>
+        </div>
+      )}
+
       <header className="fixed top-0 z-50 w-full border-b border-border/50 bg-base/80 backdrop-blur-xl">
         <div className="mx-auto flex h-20 w-full max-w-[1920px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-10">
           <div className="flex items-center gap-8 xl:gap-12">
             <a className="group flex items-center gap-3" href="/app">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-steel/50 bg-steel/30 text-cyan shadow-sm transition-colors group-hover:border-cyan">
-                <Icon name="terminal" className="text-[20px]" />
+                <Icon name="terminal" className="text-[17px]" />
               </div>
               <span className="font-display text-xl font-bold tracking-tight text-cream">LockedIn</span>
             </a>
-            <nav className="hidden items-center gap-2 md:flex">
-              <button
-                onClick={() => setMode("board")}
-                className={`rounded-lg px-4 py-2 text-sm font-medium transition-all ${
-                  mode === "board"
-                    ? "border border-border/70 bg-surface-raised text-cyan"
-                    : "text-cream-muted hover:bg-surface-raised/50 hover:text-cream"
-                }`}
-              >
-                Pipeline
-              </button>
-              <button
-                onClick={() => setCadenceOpen(true)}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-cream-muted transition-all hover:bg-surface-raised/50 hover:text-cream"
-              >
-                Cadence
-              </button>
-              <button
-                onClick={() => {
-                  setMode("board");
-                  document.getElementById("parser-banner")?.scrollIntoView({ behavior: "smooth", block: "center" });
-                  document.getElementById("parser-input")?.focus();
-                }}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-cream-muted transition-all hover:bg-surface-raised/50 hover:text-cream"
-              >
-                Recruiter Parser
-              </button>
-              <button
-                onClick={() => setSettingsOpen(true)}
-                className="rounded-lg px-4 py-2 text-sm font-medium text-cream-muted transition-all hover:bg-surface-raised/50 hover:text-cream"
-              >
-                Settings
-              </button>
-            </nav>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4">
@@ -447,23 +483,23 @@ export function Pipeline() {
               href="/api/calendar.ics"
               className="hidden items-center gap-2 rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium text-cream-muted transition-all hover:border-steel hover:text-cream sm:flex"
             >
-              <Icon name="calendar_today" className="text-[18px] text-cyan" />
+              <Icon name="calendar_today" className="text-[16px] text-cyan" />
               <span className="hidden lg:inline">Sync ICS</span>
             </a>
             <button
               onClick={() => openAdd()}
               className="flex items-center gap-2 rounded-lg border border-cyan/40 bg-gradient-to-r from-steel to-steel-dim px-3 py-2 text-sm font-medium text-cream shadow-md transition-all hover:border-cyan sm:px-4"
             >
-              <Icon name="add" className="text-[18px] text-cyan" />
+              <Icon name="add" className="text-[16px] text-cyan" />
               <span className="hidden sm:inline">Add Application</span>
             </button>
             <div className="mx-1 hidden h-5 w-px bg-border sm:block" />
             <button
               onClick={() => setSettingsOpen(true)}
               className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface-raised text-cyan transition-colors hover:border-cyan"
-              title="Account settings"
+              title="Settings"
             >
-              <Icon name="person" className="text-[19px]" />
+              <Icon name="settings" className="text-[16.5px]" />
             </button>
           </div>
         </div>
@@ -475,7 +511,7 @@ export function Pipeline() {
             <div className="relative w-full sm:w-80">
               <Icon
                 name="search"
-                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[18px] text-cream-muted/60"
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[16px] text-cream-muted/60"
               />
               <input
                 value={search}
@@ -494,7 +530,7 @@ export function Pipeline() {
                     : "text-cream-muted hover:text-cream"
                 }`}
               >
-                <Icon name="view_kanban" className="text-[16px]" />
+                <Icon name="view_kanban" className="text-[14px]" />
                 <span>Board</span>
               </button>
               <button
@@ -505,7 +541,7 @@ export function Pipeline() {
                     : "text-cream-muted hover:text-cream"
                 }`}
               >
-                <Icon name="table_rows" className="text-[16px]" />
+                <Icon name="table_rows" className="text-[14px]" />
                 <span>List</span>
               </button>
             </div>
@@ -527,14 +563,14 @@ export function Pipeline() {
           <div className="relative z-10 flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
             <div className="flex items-start gap-3.5">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-steel/40 bg-steel/20 text-cyan">
-                <Icon name="auto_awesome" className="text-[20px]" />
+                <Icon name="auto_awesome" className="text-[17px]" />
               </div>
               <div>
                 <div className="mb-0.5 flex items-center gap-3">
                   <h2 className="font-display text-sm font-semibold tracking-tight text-cream">
                     Smart Recruiter Parser
                   </h2>
-                  <span className="rounded-md border border-cyan/30 bg-cyan/15 px-2 py-0.5 text-[10px] font-semibold text-cyan">
+                  <span className="rounded-md border border-cyan/30 bg-cyan/15 px-2 py-0.5 text-[9px] font-semibold text-cyan">
                     Auto Extract
                   </span>
                 </div>
@@ -544,21 +580,13 @@ export function Pipeline() {
                 </p>
               </div>
             </div>
-            <div className="flex max-w-2xl flex-1 items-center gap-3">
-              <textarea
-                id="parser-input"
-                rows={1}
-                value={parserText}
-                onChange={(event) => setParserText(event.target.value)}
-                className="max-h-24 min-h-[38px] w-full resize-none rounded-xl border border-border bg-surface-raised/80 px-4 py-2 text-xs leading-5 text-cream/90 placeholder:text-cream-muted/50 focus:border-cyan focus:outline-none"
-                placeholder="e.g. Verkada invited you to a 45-min Security SWE phone interview. Schedule via Calendly…"
-              />
+            <div className="flex shrink-0 items-center gap-3">
               <button
-                onClick={runParse}
-                disabled={parsing}
-                className="flex shrink-0 items-center gap-1.5 rounded-xl bg-cyan px-4 py-2 text-xs font-semibold text-on-primary-container shadow-sm transition-all hover:bg-cyan/90 disabled:opacity-60"
+                onClick={openPasteDraft}
+                className="flex shrink-0 items-center gap-1.5 rounded-xl bg-cyan px-4 py-2.5 text-xs font-semibold text-on-primary-container shadow-sm transition-all hover:bg-cyan/90"
               >
-                {parsing ? <SpinnerLabel label="Parsing" /> : <><Icon name="bolt" className="text-[15px]" /><span>Parse &amp; Draft</span></>}
+                <Icon name="content_paste" className="text-[13px]" />
+                <span>Paste &amp; Draft</span>
               </button>
             </div>
           </div>
@@ -592,17 +620,17 @@ export function Pipeline() {
                         className="text-cream-muted transition-colors hover:text-cyan"
                         title={`Add to ${STAGE_LABELS[stage]}`}
                       >
-                        <Icon name="add" className="text-[18px]" />
+                        <Icon name="add" className="text-[16px]" />
                       </button>
                     </div>
 
                     <div className="flex flex-col gap-3">
                       {items.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-border/50 bg-surface/20 px-3 py-7 text-center">
-                          <p className="text-[11px] text-cream-muted/60">No applications here yet.</p>
+                          <p className="text-[10px] text-cream-muted/60">No applications here yet.</p>
                           <button
                             onClick={() => openAdd(stage)}
-                            className="mt-1.5 text-[11px] font-semibold text-cyan/80 hover:text-cyan"
+                            className="mt-1.5 text-[10px] font-semibold text-cyan/80 hover:text-cyan"
                           >
                             Add one
                           </button>
@@ -641,14 +669,14 @@ export function Pipeline() {
                 className="mt-4 flex w-full items-center justify-between rounded-xl border border-border/50 bg-surface/30 px-4 py-3 text-left transition hover:border-steel"
               >
                 <span className="flex items-center gap-2 text-xs text-cream-muted">
-                  <Icon name="archive" className="text-[17px] text-cream-muted/70" />
+                  <Icon name="archive" className="text-[15px] text-cream-muted/70" />
                   Closed applications
-                  <span className="rounded-full border border-border bg-surface-raised px-2 py-0.5 text-[10px] font-semibold text-cream-muted">
+                  <span className="rounded-full border border-border bg-surface-raised px-2 py-0.5 text-[9px] font-semibold text-cream-muted">
                     {closed.length}
                   </span>
                 </span>
-                <span className="flex items-center gap-1 text-[11px] font-semibold text-cyan">
-                  View in list <Icon name="arrow_forward" className="text-[14px]" />
+                <span className="flex items-center gap-1 text-[10px] font-semibold text-cyan">
+                  View in list <Icon name="arrow_forward" className="text-[12.5px]" />
                 </span>
               </button>
             )}
@@ -668,9 +696,9 @@ export function Pipeline() {
         className="group fixed bottom-8 right-8 z-40 flex h-14 w-14 items-center justify-center rounded-full border border-cyan/50 bg-gradient-to-r from-steel to-steel-dim text-cyan shadow-xl transition-all hover:scale-105 hover:border-cyan"
         title="Upcoming cadence"
       >
-        <Icon name="calendar_today" className="text-[26px] text-cyan transition-all group-hover:brightness-110" />
+        <Icon name="calendar_today" className="text-[22px] text-cyan transition-all group-hover:brightness-110" />
         {cadenceItems.length > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-5 w-5 animate-pulse items-center justify-center rounded-full border-2 border-base bg-rose text-[11px] font-bold text-base">
+          <span className="absolute -right-1 -top-1 flex h-5 w-5 animate-pulse items-center justify-center rounded-full border-2 border-base bg-rose text-[10px] font-bold text-base">
             {cadenceItems.length}
           </span>
         )}
@@ -689,6 +717,15 @@ export function Pipeline() {
         }}
       />
 
+      <ParserInputModal
+        open={parserInputOpen}
+        value={parserText}
+        onChange={setParserText}
+        parsing={parsing}
+        onClose={() => setParserInputOpen(false)}
+        onSubmit={runParse}
+      />
+
       <ParserPreview
         open={parserOpen}
         draft={draft}
@@ -701,9 +738,16 @@ export function Pipeline() {
 
       <SettingsModal
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false);
+          setSettingsFocus(null);
+        }}
         authenticated
-        onSaved={handleSaved}
+        focusSection={settingsFocus}
+        onSaved={async () => {
+          await handleSaved();
+          setSettingsFocus(null);
+        }}
         notify={notify}
       />
       <ApplicationModal
@@ -805,19 +849,19 @@ function BoardCard({
 
       <div className="flex items-center justify-between gap-2 border-t border-border/40 pt-2 text-xs">
         {actionDue ? (
-          <span className="flex items-center gap-1.5 rounded-md border border-[#EF4444]/40 bg-[#EF4444]/15 px-2 py-0.5 text-[11px] font-semibold text-[#FF95A5]">
+          <span className="flex items-center gap-1.5 rounded-md border border-[#EF4444]/40 bg-[#EF4444]/15 px-2 py-0.5 text-[10px] font-semibold text-[#FF95A5]">
             <span className="h-1.5 w-1.5 rounded-full bg-[#EF4444] shadow-[0_0_6px_#EF4444]" />
             Due {relative(app.next_action_at)}
           </span>
         ) : app.check_back_at ? (
           <span
-            className={`flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium ${
+            className={`flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-medium ${
               checkDue
                 ? "border-[#EF4444]/40 bg-[#EF4444]/15 text-[#FF95A5]"
                 : "border-[#F59E0B]/30 bg-[#F59E0B]/15 text-[#FCD34D]"
             }`}
           >
-            <Icon name="schedule" className="text-[13px]" />
+            <Icon name="schedule" className="text-[12px]" />
             {checkDue ? "Check back due" : `${relative(app.check_back_at)} check-back`}
           </span>
         ) : (
@@ -849,15 +893,15 @@ function ListView({
           All applications <span className="ml-1 text-xs font-normal text-cream-muted">({applications.length})</span>
         </h2>
         <div className="flex items-center gap-2">
-          <button onClick={onAdd} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-semibold text-cream-muted hover:border-cyan/50 hover:text-cream">
+          <button onClick={onAdd} className="rounded-lg border border-border px-3 py-1.5 text-[10px] font-semibold text-cream-muted hover:border-cyan/50 hover:text-cream">
             Add
           </button>
-          <button onClick={onShowBoard} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-semibold text-cream-muted hover:border-cyan/50 hover:text-cream">
+          <button onClick={onShowBoard} className="rounded-lg border border-border px-3 py-1.5 text-[10px] font-semibold text-cream-muted hover:border-cyan/50 hover:text-cream">
             Board view
           </button>
         </div>
       </div>
-      <div className="hidden grid-cols-[minmax(0,1.5fr)_120px_120px_140px_32px] gap-3 border-b border-border/40 px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-cream-muted/70 md:grid">
+      <div className="hidden grid-cols-[minmax(0,1.5fr)_120px_120px_140px_32px] gap-3 border-b border-border/40 px-4 py-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-cream-muted/70 md:grid">
         <span>Company / role</span>
         <span>Stage</span>
         <span>Check back</span>
@@ -879,25 +923,110 @@ function ListView({
                 <CompanyAvatar company={app.company} stage={app.stage} />
                 <div className="min-w-0">
                   <p className="truncate text-xs font-semibold text-cream">{app.company || "Untitled"}</p>
-                  <p className="truncate text-[11px] text-cream-muted">
+                  <p className="truncate text-[10px] text-cream-muted">
                     {app.role || "—"}
                     {app.location ? ` · ${app.location}` : ""}
                   </p>
                 </div>
               </div>
               <StageBadge stage={app.stage} />
-              <span className={`hidden text-[11px] md:block ${overdue ? "font-semibold text-signal-warning" : "text-cream-muted"}`}>
+              <span className={`hidden text-[10px] md:block ${overdue ? "font-semibold text-signal-warning" : "text-cream-muted"}`}>
                 {app.check_back_at ? fmtDate(app.check_back_at) : "—"}
               </span>
-              <span className="hidden truncate text-[11px] text-cream-muted md:block">
+              <span className="hidden truncate text-[10px] text-cream-muted md:block">
                 {app.next_action || "—"}
               </span>
-              <Icon name="chevron_right" className="hidden text-[17px] text-cream-muted md:block" />
+              <Icon name="chevron_right" className="hidden text-[15px] text-cream-muted md:block" />
             </button>
           );
         })
       )}
     </section>
+  );
+}
+
+function ParserInputModal({
+  open,
+  value,
+  onChange,
+  parsing,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean;
+  value: string;
+  onChange: (value: string) => void;
+  parsing: boolean;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      className="max-w-2xl overflow-hidden rounded-2xl border border-border bg-[#0c101b] shadow-2xl"
+    >
+      <div className="flex max-h-[92vh] flex-col">
+        <div className="flex items-start justify-between border-b border-border/60 px-6 py-5">
+          <div>
+            <div className="flex items-center gap-2">
+              <Icon name="auto_awesome" className="text-[16px] text-cyan" />
+              <h2 className="font-display text-lg font-bold tracking-tight text-cream">
+                Paste recruiter email
+              </h2>
+            </div>
+            <p className="mt-1 text-xs text-cream-muted">
+              Paste the full email body. The AI provider extracts the role, stage, and deadlines.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="-mr-1 rounded-lg p-1 text-cream-muted transition hover:bg-white/5 hover:text-cream"
+          >
+            <Icon name="close" className="text-[17px]" />
+          </button>
+        </div>
+
+        <div className="px-6 py-4">
+          <textarea
+            autoFocus
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="Paste the entire recruiter email here, including the greeting and signature…"
+            className="min-h-[46vh] w-full resize-y rounded-xl border border-border bg-[#070b13] px-4 py-3 font-mono text-[11.5px] leading-relaxed text-cream/90 placeholder:text-cream-muted/40 focus:border-cyan focus:outline-none"
+          />
+        </div>
+
+        <div className="flex items-center justify-between border-t border-border/60 bg-[#090d16] px-6 py-4">
+          <span className="text-[10px] text-cream-muted">
+            {value.trim().length.toLocaleString()} characters
+          </span>
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={onClose}
+              className="px-1 text-xs font-medium text-cream-muted transition hover:text-cream"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onSubmit}
+              disabled={parsing || !value.trim()}
+              className="flex items-center gap-1.5 rounded-lg bg-cyan px-4 py-2 text-xs font-semibold text-[#07131b] shadow-sm transition-all hover:bg-cyan/90 disabled:opacity-60"
+            >
+              {parsing ? (
+                <SpinnerLabel label="Parsing" />
+              ) : (
+                <>
+                  <Icon name="bolt" className="text-[13px]" />
+                  <span>Parse &amp; Draft</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -931,14 +1060,14 @@ function ParserPreview({
       <div className="animate-rise-in flex w-full max-w-md flex-col gap-4 rounded-2xl border border-border/80 bg-surface p-6 text-left shadow-2xl">
         <div className="flex items-center justify-between border-b border-border/40 pb-3">
           <div className="flex items-center gap-2">
-            <Icon name="auto_awesome" className="text-[18px] text-cyan" />
+            <Icon name="auto_awesome" className="text-[16px] text-cyan" />
             <h3 className="font-display text-sm font-semibold tracking-wide text-cream">Smart Parser Draft</h3>
-            <span className="rounded-full border border-cyan/30 bg-cyan/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-cyan">
+            <span className="rounded-full border border-cyan/30 bg-cyan/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-cyan">
               Preview ready
             </span>
           </div>
           <button onClick={onClose} className="rounded-lg p-1 text-cream-muted/60 transition-colors hover:bg-surface-raised hover:text-cream">
-            <Icon name="close" className="text-[18px]" />
+            <Icon name="close" className="text-[16px]" />
           </button>
         </div>
 
@@ -950,7 +1079,7 @@ function ParserPreview({
           <FieldBox label="Company" value={draft.company || "—"} />
           <FieldBox label="Role" value={draft.role || "—"} />
           <div className="rounded-lg border border-border/50 bg-surface-raised p-2.5">
-            <span className="mb-0.5 block text-[10px] font-medium text-cream-muted/60">Target stage</span>
+            <span className="mb-0.5 block text-[9px] font-medium text-cream-muted/60">Target stage</span>
             <span className={`flex items-center gap-1 font-semibold ${meta.text}`}>
               <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
               {STAGE_LABELS[draft.stage]}
@@ -963,7 +1092,7 @@ function ParserPreview({
           />
         </div>
 
-        <div className="flex items-center justify-between border-t border-border/40 pt-2 text-[10px] text-cream-muted/70">
+        <div className="flex items-center justify-between border-t border-border/40 pt-2 text-[9px] text-cream-muted/70">
           <span className="capitalize">{draft.parser} parser · {Math.round(draft.confidence * 100)}% confidence</span>
           {draft.evidence.length > 0 && <span className="truncate pl-3">{draft.evidence[0]}</span>}
         </div>
@@ -977,7 +1106,7 @@ function ParserPreview({
             disabled={saving}
             className="flex items-center gap-1.5 rounded-lg bg-cyan px-4 py-1.5 text-xs font-semibold text-on-primary-container shadow-md transition-all hover:bg-cyan/90 disabled:opacity-60"
           >
-            {saving ? <SpinnerLabel label="Adding" /> : <><Icon name="check_circle" className="text-[14px]" /> Confirm &amp; Add</>}
+            {saving ? <SpinnerLabel label="Adding" /> : <><Icon name="check_circle" className="text-[12.5px]" /> Confirm &amp; Add</>}
           </button>
         </div>
       </div>
@@ -988,7 +1117,7 @@ function ParserPreview({
 function FieldBox({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
   return (
     <div className="rounded-lg border border-border/50 bg-surface-raised p-2.5">
-      <span className="mb-0.5 block text-[10px] font-medium text-cream-muted/60">{label}</span>
+      <span className="mb-0.5 block text-[9px] font-medium text-cream-muted/60">{label}</span>
       <span className={`block truncate font-semibold ${accent ? "text-cyan" : "text-cream"}`}>{value}</span>
     </div>
   );
@@ -1035,7 +1164,7 @@ function CadenceDrawer({
         <div className="flex items-center justify-between border-b border-border/40 pb-3">
           <div className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-steel/50 bg-steel/30 text-cyan">
-              <Icon name="event_upcoming" className="text-[18px]" />
+              <Icon name="event_upcoming" className="text-[16px]" />
             </div>
             <div>
               <h3 className="font-display text-base font-semibold text-cream">Upcoming Cadence</h3>
@@ -1045,14 +1174,14 @@ function CadenceDrawer({
             </div>
           </div>
           <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg bg-surface-raised text-cream-muted transition-colors hover:border hover:border-steel hover:text-cream">
-            <Icon name="close" className="text-[18px]" />
+            <Icon name="close" className="text-[16px]" />
           </button>
         </div>
 
         <div className="rounded-xl border border-border/50 bg-surface-raised/60 p-2 text-center text-xs">
           <div className="grid grid-cols-7 gap-1">
             {["M", "T", "W", "T", "F", "S", "S"].map((day, index) => (
-              <div key={`${day}-${index}`} className="p-1 text-[10px] text-cream-muted/70">{day}</div>
+              <div key={`${day}-${index}`} className="p-1 text-[9px] text-cream-muted/70">{day}</div>
             ))}
             {week.map((date) => {
               const isToday = date.toDateString() === now.toDateString();
@@ -1103,12 +1232,12 @@ function CadenceDrawer({
                       <p className="text-xs font-semibold text-cream transition-colors group-hover:text-cyan">
                         {item.company}
                       </p>
-                      <p className="mt-0.5 text-[11px] text-cream-muted">
+                      <p className="mt-0.5 text-[10px] text-cream-muted">
                         {fmtDate(item.due_at)} · {item.title || item.role}
                       </p>
                     </div>
                   </div>
-                  <span className={`shrink-0 rounded-md border px-2.5 py-1 text-[11px] font-semibold ${chip}`}>
+                  <span className={`shrink-0 rounded-md border px-2.5 py-1 text-[10px] font-semibold ${chip}`}>
                     {relative(item.due_at)}
                   </span>
                 </button>
@@ -1147,7 +1276,7 @@ function Toast({ message, tone }: { message: string; tone: "success" | "error" }
             : "border-error/30 bg-error-container/80 text-white"
         }`}
       >
-        <Icon name={tone === "success" ? "check_circle" : "error"} className={`text-[16px] ${tone === "success" ? "text-cyan" : "text-white"}`} />
+        <Icon name={tone === "success" ? "check_circle" : "error"} className={`text-[14px] ${tone === "success" ? "text-cyan" : "text-white"}`} />
         {message}
       </div>
     </div>

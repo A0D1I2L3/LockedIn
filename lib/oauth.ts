@@ -21,7 +21,7 @@ export function isOAuthConfigured(): boolean {
 export function authorizationUrl(state: string): string {
   const { clientId } = oauthCredentials();
   const config = getConfig();
-  if (!clientId) throw new Error("Google OAuth is not configured. Add your Client ID in Settings.");
+  if (!clientId) throw new Error("Google OAuth is not configured. Set GOOGLE_CLIENT_ID.");
   const url = new URL(GOOGLE_AUTH_URL);
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", config.redirectUri);
@@ -37,7 +37,9 @@ export async function exchangeCode(code: string) {
   const { clientId, clientSecret } = oauthCredentials();
   const config = getConfig();
   if (!clientId || !clientSecret) {
-    throw new Error("Google OAuth is not configured. Add your Client ID and secret in Settings.");
+    throw new Error(
+      "Google OAuth is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.",
+    );
   }
   const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
     method: "POST",

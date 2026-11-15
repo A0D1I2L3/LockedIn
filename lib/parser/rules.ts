@@ -11,7 +11,9 @@ const REJECTION = [
   "unfortunately", "not moving forward", "will not be moving forward", "not selected",
   "regret to inform", "will not be proceeding", "decided not to move forward",
   "not successful", "position has been filled", "no longer under consideration",
-  "not proceed with your application", "wish you the best",
+  "not proceed with your application", "wish you the best in your future",
+  "wish you all the best in your future", "best of luck in your future endeavors",
+  "move forward with other candidates", "decided to move forward with other",
 ];
 const WITHDRAWN = ["withdraw", "withdrawn", "withdrawing your application"];
 const OFFER = [
@@ -20,9 +22,20 @@ const OFFER = [
   "accepted for the position",
 ];
 const ASSESSMENT = [
-  "coding test", "online assessment", "hackerrank", "codesignal", "codility",
-  "take-home", "take home", "technical assessment", "technical test", "assessment",
+  "coding test", "online assessment", "take-home", "take home",
+  "technical assessment", "technical test", "assessment",
   "challenge link", "coding challenge", "online test", "oa link",
+];
+
+const ASSESSMENT_DEFERRED = [
+  "if shortlisted", "if you are shortlisted", "if selected", "will receive",
+  "will be sent", "will send", "we will send", "next step", "may receive",
+  "might receive", "could receive", "no action", "not required",
+];
+
+const ASSESSMENT_ACTIONABLE = [
+  "complete", "start", "take the", "finish", "submit", "begin", "link",
+  "invited", "due", "deadline", "please", "access",
 ];
 const INTERVIEW = [
   "interview", "phone screen", "recruiter screen", "schedule a call", "schedule a time",
@@ -31,14 +44,26 @@ const INTERVIEW = [
 ];
 const APPLIED = [
   "thank you for applying", "thanks for applying", "application received",
-  "we received your application", "received your application", "application submitted",
-  "application has been submitted", "successfully applied", "your application was submitted",
-  "application confirmation", "we have your application", "your application for",
+  "application has been received", "application was received", "application has been submitted",
+  "we received your application", "received your application", "successfully applied",
+  "your application was submitted", "application confirmation", "we have your application",
+  "we have received your application", "your application for",
 ];
 
 function find(text: string, phrases: string[]): string | null {
   for (const phrase of phrases) if (text.includes(phrase)) return phrase;
   return null;
+}
+
+function findAssessment(text: string): string | null {
+  const phrase = find(text, ASSESSMENT);
+  if (!phrase) return null;
+  const index = text.indexOf(phrase);
+  const context = text.slice(Math.max(0, index - 140), index + phrase.length + 80);
+  const deferred = ASSESSMENT_DEFERRED.some((marker) => context.includes(marker));
+  const actionable = ASSESSMENT_ACTIONABLE.some((marker) => context.includes(marker));
+  if (deferred && !actionable) return null;
+  return phrase;
 }
 
 export function classifyStage(text: string, subject = "") {
@@ -49,7 +74,7 @@ export function classifyStage(text: string, subject = "") {
   if (withdrawn) return { stage: "withdrawn" as Stage, confidence: 0.95, evidence: withdrawn };
   const offer = find(haystack, OFFER);
   if (offer) return { stage: "offer" as Stage, confidence: 0.97, evidence: offer };
-  const assessment = find(haystack, ASSESSMENT);
+  const assessment = findAssessment(haystack);
   if (assessment) return { stage: "assessment" as Stage, confidence: 0.92, evidence: assessment };
   const interview = find(haystack, INTERVIEW);
   if (interview) return { stage: "interview" as Stage, confidence: 0.88, evidence: interview };
@@ -124,6 +149,7 @@ function cleanRole(value: string): string {
 export function extractRole(text: string, options: { subject?: string } = {}): string {
   const haystack = `${options.subject || ""}\n${text || ""}`;
   const patterns = [
+    /(?:interest in|applying for|applied for|application for)\s+(?:the\s+)?([A-Z][^.\n,]{2,90}?)\s+(?:role|position|internship|opening|opportunity)\b/,
     /(?:application|applied|candidacy)\s+(?:for|to|as)\s+(?:the\s+)?([A-Z][^.\n,]{2,90}?)(?=\s+(?:at|with|position|role|has|was|is|and|,|\.|\n)|$)/,
     /(?:the|a|an)\s+([A-Z][\w /&+.\-]{2,70}?)\s+(?:position|role|internship|opening)\b/,
     /(?:position|role|opening)\s+(?:of|for)\s+([A-Z][^.\n,]{2,80})/,

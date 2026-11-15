@@ -63,7 +63,7 @@ export function StageBadge({ stage }: { stage: Stage }) {
   const meta = stageMeta(stage);
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide ${meta.pill}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold tracking-wide ${meta.pill}`}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
       {STAGE_LABELS[stage] || "Applied"}
@@ -76,7 +76,7 @@ export function CompanyAvatar({ company, stage }: { company: string; stage: Stag
   const initial = (company || "?").trim().charAt(0).toUpperCase() || "?";
   return (
     <span
-      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold ${meta.avatar}`}
+      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold ${meta.avatar}`}
     >
       {initial}
     </span>
@@ -86,7 +86,7 @@ export function CompanyAvatar({ company, stage }: { company: string; stage: Stag
 export function EmptyState({ message, icon = "inbox" }: { message: string; icon?: string }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 p-8 text-center">
-      <Icon name={icon} className="text-[28px] text-text-tertiary" />
+      <Icon name={icon} className="text-[24px] text-text-tertiary" />
       <p className="text-xs text-text-tertiary">{message}</p>
     </div>
   );
@@ -175,5 +175,5 @@ export function relative(ms: number | null | undefined) {
 
 export function EventIcon({ type }: { type: string }) {
   const name = type === "email" ? "mail" : type === "outcome" ? "flag" : "history";
-  return <Icon name={name} className="mt-0.5 text-[18px] text-text-tertiary" />;
+  return <Icon name={name} className="mt-0.5 text-[16px] text-text-tertiary" />;
 }

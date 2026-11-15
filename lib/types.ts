@@ -119,7 +119,7 @@ export interface UserPreferences {
   llm_api_key_set?: boolean;
 }
 
-export type LLMProvider = "openai" | "grok" | "claude";
+export type LLMProvider = "openai" | "groq" | "grok" | "claude";
 
 export interface NotificationItem {
   kind: string;
@@ -155,6 +155,7 @@ export interface ParsedDraft {
   check_back_at: number | null;
   check_back_source: string;
   next_action_at: number | null;
+  applied_at: number | null;
   received_at: number;
   subject: string;
   from_email: string;

@@ -48,6 +48,7 @@ export const snoozeInputSchema = z.object({
 
 export const emailInputSchema = z.object({
   raw_text: z.string().default(""),
+  parser_mode: z.enum(["auto", "rules", "llm"]).optional(),
   subject: z.string().default(""),
   from_email: z.string().default(""),
   received_at: nullableDate,
@@ -58,8 +59,6 @@ export const emailInputSchema = z.object({
 });
 
 export const preferencesInputSchema = z.object({
-  client_id: z.string().optional(),
-  client_secret: z.string().optional(),
   parser_mode: z.enum(["auto", "rules", "llm"]).optional(),
   default_follow_up_days: z.coerce.number().int().min(1).max(90).optional(),
   timezone: z.string().optional(),

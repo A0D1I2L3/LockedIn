@@ -7,7 +7,7 @@ import { Icon, Modal, SpinnerLabel, dateInputValue, fmtDate } from "@/components
 
 const inputClass =
   "w-full rounded-lg border border-surface-border bg-surface-container-lowest px-3 py-2 text-sm text-text-primary outline-none transition focus:border-primary/60 focus:ring-2 focus:ring-primary/20 placeholder:text-text-tertiary";
-const labelClass = "mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.16em] text-text-tertiary";
+const labelClass = "mb-1.5 block text-[9px] font-semibold uppercase tracking-[0.16em] text-text-tertiary";
 
 interface FormState {
   company: string;
@@ -212,9 +212,9 @@ export function ApplicationModal({
                 onClick={() => setParseOpen((value) => !value)}
                 className="flex w-full items-center gap-2 text-left"
               >
-                <Icon name="auto_awesome" className="text-[18px] text-primary" />
+                <Icon name="auto_awesome" className="text-[16px] text-primary" />
                 <span className="flex-1 text-xs font-semibold text-primary">Autofill from an email</span>
-                <Icon name={parseOpen ? "expand_less" : "expand_more"} className="text-[18px] text-primary" />
+                <Icon name={parseOpen ? "expand_less" : "expand_more"} className="text-[16px] text-primary" />
               </button>
               {parseOpen && (
                 <div className="mt-3 space-y-2">
@@ -226,7 +226,7 @@ export function ApplicationModal({
                     className={`${inputClass} font-mono text-xs`}
                   />
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] text-text-tertiary">Rules run first; the LLM only fills gaps.</span>
+                    <span className="text-[9px] text-text-tertiary">Rules run first; the LLM only fills gaps.</span>
                     <button
                       type="button"
                       onClick={handleParse}
@@ -237,7 +237,7 @@ export function ApplicationModal({
                     </button>
                   </div>
                   {draft && (
-                    <div className="rounded-lg bg-surface-container-lowest p-2 text-[11px] text-text-secondary">
+                    <div className="rounded-lg bg-surface-container-lowest p-2 text-[10px] text-text-secondary">
                       <div className="flex items-center justify-between">
                         <span>
                           <span className="font-semibold capitalize text-text-primary">{draft.parser}</span> ·{" "}
@@ -318,7 +318,7 @@ export function ApplicationModal({
           </div>
 
           {terminal && (
-            <p className="rounded-lg bg-stage-rejected/10 px-3 py-2 text-[11px] text-stage-rejected">
+            <p className="rounded-lg bg-stage-rejected/10 px-3 py-2 text-[10px] text-stage-rejected">
               This stage closes the application and clears active reminders.
             </p>
           )}

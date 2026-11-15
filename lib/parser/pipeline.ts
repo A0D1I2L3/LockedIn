@@ -66,44 +66,57 @@ export async function parseEmail(raw: string, options: ParseEmailOptions = {}): 
     rules.extractNextAction(stage, body);
 
   let llmData: LLMParsedEmail | null = null;
-  const mode = options.parserMode || "auto";
+  const mode = options.parserMode || "llm";
   const shouldTryLLM =
     Boolean(options.llmConfig) &&
     isLLMConfigured(options.llmConfig) &&
     (mode === "llm" || mode === "auto") &&
     (mode === "llm" || confidence < 0.65);
   if (shouldTryLLM) {
-    llmData = await parseWithLLM(body, { subject, config: options.llmConfig! });
+    llmData = await parseWithLLM(body, {
+      subject,
+      fromEmail,
+      receivedAt: anchorMs,
+      timezone,
+      defaultFollowUpDays,
+      config: options.llmConfig!,
+      strict: mode === "llm",
+    });
   }
 
-  let llmDeadline: number | null = null;
+  const llmDate = (value: string | null | undefined) =>
+    value ? parseDate(value, anchorMs, timezone) : null;
+  const llmStage = llmData?.stage ?? llmData?.status ?? null;
+  const llmNextActionAt = llmDate(llmData?.next_action_date);
+  const llmCheckBackAt = llmDate(llmData?.check_back_date);
+  const llmDeadlineAt = llmDate(llmData?.deadline);
+  const llmAppliedAt = llmDate(llmData?.applied_date);
+
   if (llmData) {
     let usedLLM = false;
-    if (llmData.company && !options.companyHint && !company) {
+    if (llmData.company && !options.companyHint) {
       company = llmData.company;
       usedLLM = true;
     }
-    if (llmData.role && !options.roleHint && !role) {
+    if (llmData.role && !options.roleHint) {
       role = llmData.role;
       usedLLM = true;
     }
-    if (llmData.location && !location) {
+    if (llmData.location) {
       location = llmData.location;
       usedLLM = true;
     }
-    if (llmData.stage && !options.stageHint && confidence < 0.65) {
-      stage = llmData.stage;
-      confidence = Math.max(confidence, llmData.confidence || 0);
+    if (llmStage && !options.stageHint) {
+      stage = llmStage;
       usedLLM = true;
     }
     if (llmData.next_action) {
       nextAction = { next_action: llmData.next_action, action_state: "action_required" };
       usedLLM = true;
     }
-    if (llmData.deadline) llmDeadline = parseDate(llmData.deadline, anchorMs, timezone);
+    confidence = Math.max(confidence, llmData.confidence || 0);
     if (llmData.evidence.length) evidence.push(...llmData.evidence.map(String));
-    if (usedLLM) parser = parser === "rules" && confidence >= 0.65 ? "hybrid" : "llm";
-    else if (mode === "llm") parser = "rules";
+    if (usedLLM || mode === "llm") parser = "llm";
   }
 
   company = (options.companyHint || "").trim() || company;
@@ -132,10 +145,10 @@ export async function parseEmail(raw: string, options: ParseEmailOptions = {}): 
     timezone,
     keywords: ["interview", "assessment", "deadline", "due", "complete by", "submit by", "respond by"],
   });
-  const explicitDeadline = llmDeadline || eventDate;
+  const explicitDeadline = llmDeadlineAt || llmNextActionAt || eventDate;
   let nextActionAt: number | null = null;
-  let checkBackAt: number | null = resolved.check_back_at;
-  let checkBackSource = resolved.check_back_source;
+  let checkBackAt: number | null = llmCheckBackAt ?? resolved.check_back_at;
+  let checkBackSource = llmCheckBackAt ? "llm" : resolved.check_back_source;
 
   if (TERMINAL.has(stage)) {
     checkBackAt = null;
@@ -143,18 +156,20 @@ export async function parseEmail(raw: string, options: ParseEmailOptions = {}): 
     nextActionAt = null;
     nextAction = { next_action: "No action needed", action_state: "waiting" };
   } else if (stage === "assessment" || stage === "interview") {
-    const deadline = explicitDeadline;
-    nextActionAt = deadline;
-    checkBackAt = deadline || anchorMs + 2 * 86_400_000;
-    checkBackSource = deadline ? "deadline" : "stage_default";
+    nextActionAt = llmNextActionAt || explicitDeadline;
+    if (!llmCheckBackAt) {
+      checkBackAt = explicitDeadline || anchorMs + 2 * 86_400_000;
+      checkBackSource = explicitDeadline ? "deadline" : "stage_default";
+    }
     if (!nextAction.next_action) nextAction = rules.extractNextAction(stage, body);
   } else if (stage === "offer") {
-    const deadline = explicitDeadline;
-    nextActionAt = deadline || anchorMs + 3 * 86_400_000;
-    checkBackAt = null;
-    checkBackSource = "none";
-  } else if (llmDeadline && window.kind === "default") {
-    checkBackAt = llmDeadline;
+    nextActionAt = llmNextActionAt || llmDeadlineAt || anchorMs + 3 * 86_400_000;
+    if (!llmCheckBackAt) {
+      checkBackAt = null;
+      checkBackSource = "none";
+    }
+  } else if (!llmCheckBackAt && llmDeadlineAt && window.kind === "default") {
+    checkBackAt = llmDeadlineAt;
     checkBackSource = "explicit_date";
   }
 
@@ -176,6 +191,7 @@ export async function parseEmail(raw: string, options: ParseEmailOptions = {}): 
     check_back_at: checkBackAt ? Math.trunc(checkBackAt) : null,
     check_back_source: checkBackSource,
     next_action_at: nextActionAt ? Math.trunc(nextActionAt) : null,
+    applied_at: llmAppliedAt ? Math.trunc(llmAppliedAt) : null,
     received_at: anchorMs,
     subject: subject.slice(0, 300),
     from_email: fromEmail.slice(0, 200),

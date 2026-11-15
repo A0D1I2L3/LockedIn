@@ -20,6 +20,10 @@ describe("LLM providers", () => {
     expect(llmEndpoint(claude)).toBe("https://api.anthropic.com/v1/messages");
     expect(claude.model).toBe(PROVIDER_DEFAULTS.claude.model);
 
+    const groq = makeLLMConfig({ provider: "groq", apiKey: "key" });
+    expect(groq.baseUrl).toBe("https://api.groq.com/openai/v1");
+    expect(llmEndpoint(groq)).toBe("https://api.groq.com/openai/v1/chat/completions");
+
     const grok = makeLLMConfig({ provider: "grok", apiKey: "key" });
     expect(llmEndpoint(grok)).toBe("https://api.x.ai/v1/chat/completions");
 
@@ -79,5 +83,18 @@ describe("LLM providers", () => {
       await parseWithLLM("text", { config: makeLLMConfig({ provider: "openai" }) }),
     ).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces provider failures in strict mode", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) }),
+    );
+    await expect(
+      parseWithLLM("text", {
+        config: makeLLMConfig({ provider: "groq", apiKey: "bad" }),
+        strict: true,
+      }),
+    ).rejects.toThrow("AI provider request failed");
   });
 });
