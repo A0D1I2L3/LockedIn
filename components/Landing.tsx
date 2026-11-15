@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/client";
 import { Icon } from "@/components/ui";
+import LiquidChrome from "./LiquidChrome";
 
 interface StatusPayload {
   authenticated: boolean;
@@ -35,7 +36,6 @@ function GoogleMark() {
 
 export function Landing() {
   const router = useRouter();
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [status, setStatus] = useState<StatusPayload | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -64,94 +64,6 @@ export function Landing() {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    let width = 0;
-    let height = 0;
-    let frame = 0;
-    let time = 0;
-    const config = { amplitude: 48, swell: 0.85, speed: 0.013, lightAngle: 125 };
-
-    const resize = () => {
-      const dpr = window.devicePixelRatio || 1;
-      width = window.innerWidth;
-      height = window.innerHeight;
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-      ctx.scale(dpr, dpr);
-    };
-
-    const render = () => {
-      time += config.speed;
-      ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = "#0d111c";
-      ctx.fillRect(0, 0, width, height);
-
-      const layers = [
-        {
-          colorA: "rgba(66, 91, 154, 0.45)",
-          colorB: "rgba(118, 192, 236, 0.15)",
-          freq: 0.0015,
-          ampMult: 1.15,
-          phase: 0,
-        },
-        {
-          colorA: "rgba(42, 68, 130, 0.55)",
-          colorB: "rgba(66, 91, 154, 0.28)",
-          freq: 0.002,
-          ampMult: 0.9,
-          phase: 2.3,
-        },
-        {
-          colorA: "rgba(118, 192, 236, 0.35)",
-          colorB: "rgba(255, 149, 165, 0.1)",
-          freq: 0.0018,
-          ampMult: 1,
-          phase: 4.5,
-        },
-      ];
-
-      layers.forEach((layer, index) => {
-        ctx.beginPath();
-        const baseHeight = height * (0.44 + index * 0.13);
-        ctx.moveTo(0, height);
-        for (let x = 0; x <= width; x += 10) {
-          const wave1 =
-            Math.sin(x * layer.freq + time + layer.phase) * (config.amplitude * layer.ampMult);
-          const wave2 =
-            Math.cos(x * layer.freq * 0.72 - time * 0.75) *
-            (config.amplitude * 0.48 * config.swell);
-          const y = baseHeight + wave1 + wave2;
-          if (x === 0) ctx.lineTo(0, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.lineTo(width, height);
-        ctx.closePath();
-
-        const rad = (config.lightAngle * Math.PI) / 180;
-        const gradient = ctx.createLinearGradient(0, 0, Math.cos(rad) * width, Math.sin(rad) * height);
-        gradient.addColorStop(0, layer.colorA);
-        gradient.addColorStop(1, layer.colorB);
-        ctx.fillStyle = gradient;
-        ctx.fill();
-      });
-
-      frame = requestAnimationFrame(render);
-    };
-
-    resize();
-    window.addEventListener("resize", resize);
-    frame = requestAnimationFrame(render);
-    return () => {
-      window.removeEventListener("resize", resize);
-      cancelAnimationFrame(frame);
-    };
-  }, []);
-
   function startSignIn() {
     setConnecting(true);
     if (status && !status.oauth_configured) {
@@ -164,38 +76,47 @@ export function Landing() {
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-base font-manrope text-cream">
-      <div className="pointer-events-none fixed inset-0 z-0">
-        <div className="absolute -left-40 -top-40 h-96 w-96 rounded-full bg-[#425B9A]/25 blur-[130px]" />
-        <div className="absolute -right-40 top-1/2 h-[520px] w-[520px] rounded-full bg-[#76C0EC]/15 blur-[150px]" />
-        <div className="absolute -bottom-40 left-1/3 h-80 w-80 rounded-full bg-[#FF95A5]/10 blur-[140px]" />
+      {/* Full-screen LiquidChrome background */}
+      <div className="fixed inset-0 z-0">
+        <LiquidChrome
+          color="#76C0EC"
+          speed={0.14}
+          amplitude={0.22}
+          detail={3}
+          thickness={1.15}
+          interactive
+          frequencyX={2.5}
+          frequencyY={2.5}
+          depth={1}
+          roughness={0.2}
+          exposure={1}
+          rippleStrength={1}
+          rippleSize={1}
+          tilt={1}
+          intro
+          lightMode={false}
+        />
       </div>
 
-      <main className="relative z-10 flex min-h-screen w-full flex-col items-center justify-center overflow-hidden px-4 py-10 select-none sm:px-6 md:px-10">
-        <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 z-0 h-full w-full" />
-
-        <div className="pointer-events-none absolute -top-32 left-1/2 h-[380px] w-[720px] -translate-x-1/2 rounded-full bg-[#425B9A]/20 blur-[150px]" />
-        <div className="pointer-events-none absolute bottom-[-100px] left-1/2 h-[320px] w-[620px] -translate-x-1/2 rounded-full bg-[#76C0EC]/15 blur-[140px]" />
-
-        <div className="animate-rise-in relative z-10 flex w-full max-w-2xl flex-col items-center rounded-[2.5rem] border border-outline-variant/30 bg-surface-container-lowest/70 p-8 text-center shadow-[0_20px_60px_-15px_rgba(13,17,28,0.85)] backdrop-blur-2xl sm:p-12 md:p-16">
-          <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-outline-variant/40 bg-surface-container-high/80 px-3.5 py-1.5 shadow-sm backdrop-blur-md">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan" />
-            <span className="text-[9px] font-bold uppercase tracking-[0.22em] text-on-surface-variant">
-              Career Telemetry • Private Auth
-            </span>
-          </div>
-
-          <h1 className="mb-5 bg-gradient-to-r from-[#FFF6DC] via-[#76C0EC] to-[#425B9A] bg-clip-text font-display text-[39px] font-bold leading-[1.05] tracking-[-0.03em] text-transparent sm:text-[46px] sm:leading-[62px]">
+      {/* main ignores the mouse so the chrome stays interactive;
+          the card turns pointer events back on */}
+      <main className="pointer-events-none relative z-10 flex min-h-screen w-full items-center justify-center px-4 py-10 select-none">
+        <div className="pointer-events-auto animate-rise-in flex max-w-[92vw] flex-col items-center rounded-3xl bg-black/20 px-8 py-10 text-center sm:px-14 sm:py-12">
+          <h1
+            className="bg-gradient-to-r from-[#FFF6DC] via-[#76C0EC] to-[#425B9A] bg-clip-text font-display text-[56px] font-extrabold leading-none tracking-[-0.04em] text-transparent sm:text-[88px] md:text-[112px]"
+            style={{ filter: "drop-shadow(0 4px 24px rgba(7,11,19,0.6))" }}
+          >
             LockedIn
           </h1>
 
-          <p className="mb-4 max-w-lg font-display text-lg font-medium leading-relaxed tracking-[-0.01em] text-[#FFF6DC]/95 sm:text-xl">
-            The private, rules-first internship application pipeline. Zero Gmail inbox access. Pure
-            recruitment velocity.
-          </p>
-
-          <p className="mb-10 flex max-w-md items-center justify-center gap-1.5 text-[12px] leading-5 text-[#b5c1d6]">
-            <Icon name="verified_user" className="text-[14px] text-cyan" />
-            Google Sign-in used solely for identity verification; never reads or stores your emails.
+          <p
+            className="mb-10 mt-4 max-w-md text-sm font-medium leading-6 sm:text-base"
+            style={{
+              color: "#ffffff",
+              textShadow: "0 2px 16px rgba(7,11,19,0.9), 0 1px 2px rgba(7,11,19,0.9)",
+            }}
+          >
+            Your private internship pipeline. Track applications, deadlines and follow-ups in one place.
           </p>
 
           <div className="group relative">
@@ -221,16 +142,13 @@ export function Landing() {
           </div>
 
           {status && !status.oauth_configured && (
-            <p className="mt-4 text-[10px] font-semibold text-[#FF95A5]/80">
+            <p
+              className="mt-5 text-xs font-semibold text-white"
+              style={{ textShadow: "0 2px 12px rgba(7,11,19,0.9)" }}
+            >
               Google sign-in is not configured on this deployment.
             </p>
           )}
-
-          <div className="mt-8 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-outline">
-            <span className="text-[#b5c1d6]/80">Secure enclave active</span>
-            <span className="text-[#FF95A5]/60">•</span>
-            <span className="text-[#b5c1d6]/80">Zero log retention</span>
-          </div>
         </div>
       </main>
 
