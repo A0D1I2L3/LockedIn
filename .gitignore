@@ -1,15 +1,16 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-env/
+# Node
+node_modules/
+.next/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
 
 # Local data & secrets (never commit!)
 data/
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 
 # Env
 .env

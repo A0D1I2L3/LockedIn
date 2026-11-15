@@ -37,31 +37,34 @@ No Gmail access, no inbox mirroring, and no background mailbox sync.
 
 ## Stack
 
-| Layer    | Choice                                           |
-|----------|--------------------------------------------------|
-| Backend  | Python 3.10+, FastAPI, Uvicorn                   |
-| Auth     | Google OAuth (openid/email/profile only)         |
-| Storage  | SQLite via stdlib `sqlite3`                      |
+| Layer    | Choice |
+|----------|--------|
+| Runtime  | Node.js 22.5+ (uses the built-in `node:sqlite` module) |
+| App      | Next.js App Router, React 19, TypeScript |
+| Styling  | Tailwind CSS v4 |
+| Auth     | Google OAuth (`openid`/`email`/`profile` only) |
+| Storage  | SQLite via `node:sqlite` `DatabaseSync` |
 | Parser   | Deterministic rules + optional OpenAI/Grok/Claude |
-| Frontend | Vanilla HTML/CSS/JS, Tailwind CDN, no build step |
+| Tests    | Vitest |
 
 ## Run it locally
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+npm install
 cp .env.example .env
 
-python bin/serve.py     # http://127.0.0.1:8000
+npm run dev     # http://localhost:3000
 ```
+
+The database is created on first request at `data/lockedin.db`. To start from a
+clean slate, stop the server and delete the `data/` directory.
 
 ### Google sign-in setup
 
 1. Create a project in [Google Cloud Console](https://console.cloud.google.com/).
 2. Configure the OAuth consent screen (External is fine for testing).
 3. Create an OAuth **Web application** client.
-4. Add the redirect URI `http://127.0.0.1:8000/oauth/callback`.
+4. Add the redirect URI `http://localhost:3000/oauth/callback`.
 5. Open the app → **Settings** → paste the client ID/secret. No Gmail API or
    Gmail scopes are needed.
 
@@ -83,12 +86,12 @@ Environment equivalents are `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`,
 ## Everyday flow
 
 1. **Add application** — company, role, optional URL/source/notes.
-2. Paste the confirmation email into **Autofill from email** and press
-   **Parse email**. Review the fields, then save.
+2. Paste the confirmation email into **Autofill from an email** and press
+   **Parse & autofill**. Review the fields, then save.
 3. The app schedules a check-back. On the **Today** view, due items can be
    opened, snoozed, or marked done.
 4. When a reply arrives, open the application, paste the email, and press
-   **Attach & update**. The stage and next action change; rejected/withdrawn
+   **Log & apply**. The stage and next action change; rejected/withdrawn
    applications close automatically.
 5. Record the final outcome with the outcome buttons.
 
@@ -96,21 +99,25 @@ Environment equivalents are `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`,
 
 - `GET /api/calendar.ics` exports every active check-back and action.
 - Each application has its own `.ics` download in the detail view.
-- Browser notifications are opt-in from the sidebar or Calendar view. The page
-  checks for due items every minute while open; a service worker renders the
-  notification and focuses the app when clicked.
+- Browser notifications are opt-in from the Calendar view. The page checks for
+  due items every minute while open; a service worker renders the notification
+  and focuses the app when clicked.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `python bin/serve.py` | Start the server |
-| `pytest` | Run the test suite |
+| `npm run dev` | Start the development server |
+| `npm run build` | Production build |
+| `npm start` | Run the production build |
+| `npm run typecheck` | Run TypeScript without emitting |
+| `npm test` | Run the Vitest suite |
 
 ## API
 
 | Endpoint | Description |
 |---|---|
+| `GET /api/health` | Liveness |
 | `GET /api/me` | Current signed-in user |
 | `GET /api/status` | Auth state + pipeline counts |
 | `GET /api/applications?stage=&status=&q=` | List applications |
@@ -124,18 +131,24 @@ Environment equivalents are `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`,
 | `POST /api/applications/{id}/emails` | Attach a pasted email; `apply` updates the app |
 | `GET /api/applications/{id}/timeline` | Events + pasted emails |
 | `GET /api/due`, `GET /api/notifications` | Reminder feed |
+| `GET /api/stats` | Pipeline totals |
+| `GET /api/reminders`, `PATCH /api/reminders/{id}?action=done\|dismiss` | List/complete reminders |
 | `GET /api/calendar.ics` | Full ICS export |
 | `GET/POST /api/settings` | OAuth client, parser, timezone, notifications |
 | `GET /oauth/login`, `GET /oauth/callback` | Google identity flow |
+| `POST /api/logout` | Clear the session cookie |
+
+All `/api/*` routes except status/me/settings/oauth require a valid session
+cookie.
 
 ## Parsing rules
 
-`app/parser/` is split into:
+`lib/parser/` is split into:
 
-- `dates.py` — explicit dates, relative windows, business days, event dates.
-- `rules.py` — stage classification, company/role extraction, next action.
-- `llm.py` — optional JSON-mode LLM parser validated with Pydantic.
-- `pipeline.py` — merges rules + LLM, resolves the check-back timestamp, and
+- `dates.ts` — explicit dates, relative windows, business days, event dates.
+- `rules.ts` — stage classification, company/role extraction, next action.
+- `llm.ts` — optional JSON-mode LLM parser validated with Zod.
+- `pipeline.ts` — merges rules + LLM, resolves the check-back timestamp, and
   returns an editable draft.
 
 Rules are intentionally conservative: unrecognised text becomes `applied` with
@@ -145,8 +158,8 @@ low confidence rather than a confident wrong stage. A default check-back
 ## Deploy to Render
 
 1. Create a **Web Service** from this repo.
-2. Build command: `pip install -r requirements.txt`
-3. Start command: `python bin/serve.py`
+2. Build command: `npm install && npm run build`
+3. Start command: `npm start`
 4. Environment:
    - `BASE_URL=https://your-app.onrender.com`
    - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
@@ -158,8 +171,8 @@ low confidence rather than a confident wrong stage. A default check-back
 
 ## Security notes
 
-- `data/` (SQLite, Fernet key, encrypted secrets) is git-ignored.
-- Google client secrets and LLM keys are encrypted with Fernet.
+- `data/` (SQLite, AES key, encrypted secrets) is git-ignored.
+- Google client secrets and LLM keys are encrypted with AES-256-GCM.
 - Sessions are HMAC-signed cookies. Set `SECRET_KEY` to keep them stable across
   deploys.
 - The app requests no Gmail scopes and stores no Google access/refresh tokens.
@@ -168,18 +181,18 @@ low confidence rather than a confident wrong stage. A default check-back
 
 ```
 app/
-  api.py           FastAPI routes
-  auth.py          signed session cookies
-  config.py        env/.env settings
-  db.py            SQLite schema + queries
-  models.py        stages, outcomes, reminders, serializers
-  notifications.py ICS export + notification feed
-  oauth.py         Google identity flow
-  parser/          rules, dates, LLM, pipeline
-  reminders.py     schedule/snooze/due feed
-  secret_store.py  encrypted secret storage
-  timeutil.py      epoch-ms helpers
-  static/          dashboard, service worker, icon
-bin/serve.py       Uvicorn entrypoint
-tests/             pytest suite
+  layout.tsx, page.tsx, globals.css
+  api/                 Route handlers (applications, stats, reminders, ICS…)
+  oauth/               Google identity flow
+components/            React dashboard, modals, shared UI
+lib/
+  db.ts                SQLite schema + queries
+  auth.ts, oauth.ts    Signed sessions and Google identity
+  secrets.ts           AES-256-GCM secret store
+  parser/              rules, dates, LLM, pipeline
+  reminders.ts         schedule/snooze/due feed
+  calendar.ts          ICS export + notification feed
+  api.ts, schemas.ts   Route helpers and Zod validation
+public/                Service worker and icon
+tests/                 Vitest suite
 ```
