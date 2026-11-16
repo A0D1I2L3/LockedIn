@@ -1,4 +1,5 @@
 export const STAGES = [
+  "saved",
   "applied",
   "assessment",
   "interview",
@@ -9,6 +10,7 @@ export const STAGES = [
 export type Stage = (typeof STAGES)[number];
 
 export const STAGE_LABELS: Record<Stage, string> = {
+  saved: "Saved",
   applied: "Applied",
   assessment: "Assessment",
   interview: "Interviewing",
@@ -43,7 +45,7 @@ export interface User {
   id: number;
   google_user_id: string;
   email: string | null;
-  created_at: string | null;
+  created_at: number | null;
 }
 
 export interface Application {
@@ -61,6 +63,7 @@ export interface Application {
   next_action_at: number | null;
   check_back_at: number | null;
   check_back_source: string;
+  apply_by: number | null;
   applied_at: number | null;
   last_contact_at: number | null;
   follow_up_count: number;
@@ -85,6 +88,8 @@ export interface EmailRow {
   created_at: number;
 }
 
+export type ReminderChannel = "auto" | "push" | "telegram" | "none";
+
 export interface Reminder {
   id: string;
   user_id: number;
@@ -94,9 +99,51 @@ export interface Reminder {
   title: string;
   body: string;
   status: ReminderStatus;
+  channel: ReminderChannel;
   payload: Record<string, unknown>;
   created_at: number;
   completed_at: number | null;
+}
+
+export interface PushSubscriptionRecord {
+  id: string;
+  user_id: number;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  created_at: number;
+}
+
+export interface PrepItem {
+  id: string;
+  label: string;
+  done: boolean;
+}
+
+export interface Interview {
+  id: string;
+  user_id: number;
+  application_id: string;
+  type: string;
+  scheduled_at: number | null;
+  duration_minutes: number;
+  link: string;
+  interviewer: string;
+  notes: string;
+  prep: PrepItem[];
+  questions: string[];
+  created_at: number;
+}
+
+export interface Contact {
+  id: string;
+  user_id: number;
+  application_id: string;
+  name: string;
+  email: string;
+  role: string;
+  notes: string;
+  created_at: number;
 }
 
 export interface TimelineEvent {
@@ -113,6 +160,13 @@ export interface UserPreferences {
   default_follow_up_days: number;
   timezone: string;
   notifications_enabled: boolean;
+  push_enabled: boolean;
+  digest_enabled: boolean;
+  digest_time: string;
+  quiet_hours_start: string;
+  quiet_hours_end: string;
+  reminder_channel: ReminderChannel;
+  telegram_chat_id: string;
   llm_provider: LLMProvider;
   llm_base_url: string;
   llm_model: string;
@@ -155,9 +209,17 @@ export interface ParsedDraft {
   check_back_at: number | null;
   check_back_source: string;
   next_action_at: number | null;
+  apply_by: number | null;
   applied_at: number | null;
   received_at: number;
   subject: string;
   from_email: string;
   response_window: Record<string, unknown>;
+  field_confidence?: Record<string, number>;
+  matched_application?: {
+    id: string;
+    company: string;
+    role: string;
+    stage: Stage;
+  } | null;
 }

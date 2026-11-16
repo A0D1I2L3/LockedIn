@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { extractResponseWindow, parseDate, resolveCheckBack } from "@/lib/parser/dates";
 import { makeLLMConfig } from "@/lib/parser/llm";
 import { parseEmail } from "@/lib/parser/pipeline";
+import { splitEmailThread } from "@/components/pipeline-utils";
 
 const ANCHOR = Date.UTC(2026, 10, 1, 12, 0, 0);
 
@@ -177,6 +178,42 @@ describe("parser pipeline", () => {
     expect(draft.check_back_at).toBe(parseDate("2026-11-20", ANCHOR, "UTC"));
     expect(draft.next_action_at).toBe(parseDate("2026-11-18", ANCHOR, "UTC"));
     expect(draft.applied_at).toBe(parseDate("2026-10-30", ANCHOR, "UTC"));
+  });
+
+  it("adds per-field confidence to drafts", async () => {
+    const draft = await parseEmail(
+      "Thank you for applying to the Software Engineer Intern position at PayPal.",
+      { receivedAt: ANCHOR },
+    );
+    expect(draft.field_confidence?.company).toBeGreaterThan(0);
+    expect(draft.field_confidence?.stage).toBeGreaterThan(0);
+    expect(draft.field_confidence?.location).toBe(0);
+  });
+
+  it("splits forwarded threads into separate emails", () => {
+    const raw = [
+      "From: Recruiter <recruiter@acme.com>",
+      "Sent: Monday, November 2, 2026",
+      "Subject: Interview",
+      "",
+      "We would like to schedule your interview for the Software Intern role at Acme.",
+      "",
+      "---------- Original Message ----------",
+      "From: Recruiter <recruiter@acme.com>",
+      "Sent: Monday, October 26, 2026",
+      "Subject: Application received",
+      "",
+      "Thank you for applying to the Software Intern role at Acme. We will review within two weeks.",
+    ].join("\n");
+    const parts = splitEmailThread(raw);
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toContain("schedule your interview");
+    expect(parts[1]).toContain("Thank you for applying");
+  });
+
+  it("keeps a single email intact when no thread markers exist", () => {
+    const raw = "Hi there,\n\nYour application for the Data Intern role at Figma is under review.";
+    expect(splitEmailThread(raw)).toEqual([raw]);
   });
 
   it("takes a company from the sender domain but not from an ATS", async () => {

@@ -191,10 +191,22 @@ export async function parseEmail(raw: string, options: ParseEmailOptions = {}): 
     check_back_at: checkBackAt ? Math.trunc(checkBackAt) : null,
     check_back_source: checkBackSource,
     next_action_at: nextActionAt ? Math.trunc(nextActionAt) : null,
+    apply_by: null,
     applied_at: llmAppliedAt ? Math.trunc(llmAppliedAt) : null,
     received_at: anchorMs,
     subject: subject.slice(0, 300),
     from_email: fromEmail.slice(0, 200),
     response_window: window as unknown as Record<string, unknown>,
+    field_confidence: {
+      company: company ? confidence : 0,
+      role: role ? confidence : 0,
+      stage: stageResult.confidence,
+      location: location ? Math.min(confidence, 0.7) : 0,
+      next_action: nextAction.next_action ? Math.min(confidence, 0.8) : 0,
+      dates:
+        checkBackAt || nextActionAt || llmAppliedAt
+          ? Math.min(confidence, 0.75)
+          : 0,
+    },
   };
 }

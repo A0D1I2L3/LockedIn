@@ -256,7 +256,7 @@ JSON schema:
   "company": string|null,
   "role": string|null,
   "location": string|null,
-  "stage": "applied"|"assessment"|"interview"|"offer"|"rejected"|"withdrawn"|null,
+  "stage": "saved"|"applied"|"assessment"|"interview"|"offer"|"rejected"|"withdrawn"|null,
   "next_action": string|null,
   "next_action_date": "YYYY-MM-DD"|null,
   "check_back_date": "YYYY-MM-DD"|null,
@@ -271,7 +271,7 @@ JSON schema:
 Field rules:
 - company: employer named in the email, or the company in the sender domain. Never a job board.
 - role: exact job/internship title. Do not include the company name.
-- stage: the candidate's current category. Use "applied" for application received/under review, "assessment" for online assessments or take-homes, "interview" for any interview stage, "offer" for a job offer, "rejected" for rejection, "withdrawn" if the candidate withdrew.
+- stage: the candidate's current category. Use "saved" only for a posting the candidate has not applied to yet, "applied" for application received/under review, "assessment" for online assessments or take-homes, "interview" for any interview stage, "offer" for a job offer, "rejected" for rejection, "withdrawn" if the candidate withdrew.
 - next_action: short imperative step, e.g. "Complete the coding assessment".
 - next_action_date: the explicit date for that action, if stated.
 - deadline: only an explicit deadline stated in the email.
@@ -425,6 +425,105 @@ export async function parseWithLLM(
     console.warn(`LLM parse failed (${config.provider}):`, message);
     if (options.strict) throw new Error(`AI provider request failed: ${message}`);
     return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function generateText(
+  config: LLMConfig,
+  system: string,
+  user: string,
+): Promise<string> {
+  if (!isLLMConfigured(config)) throw new Error("No AI provider configured");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.min(config.timeoutMs, 30_000));
+  const headers: Record<string, string> =
+    config.provider === "claude"
+      ? {
+          "x-api-key": config.apiKey,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        }
+      : {
+          Authorization: `Bearer ${config.apiKey}`,
+          "Content-Type": "application/json",
+        };
+  const payload =
+    config.provider === "claude"
+      ? {
+          model: config.model,
+          max_tokens: 700,
+          system,
+          messages: [{ role: "user", content: user }],
+        }
+      : {
+          model: config.model,
+          max_tokens: 700,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+        };
+  try {
+    const response = await fetch(llmEndpoint(config), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new Error(
+        `provider returned ${response.status}${detail ? `: ${detail.slice(0, 240)}` : ""}`,
+      );
+    }
+    return responseText(config, (await response.json()) as Record<string, unknown>).trim();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function testLLMConnection(config: LLMConfig): Promise<string> {
+  if (!isLLMConfigured(config)) {
+    throw new Error("Add an API key for this endpoint first.");
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.min(config.timeoutMs, 15_000));
+  const headers: Record<string, string> =
+    config.provider === "claude"
+      ? {
+          "x-api-key": config.apiKey,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        }
+      : {
+          Authorization: `Bearer ${config.apiKey}`,
+          "Content-Type": "application/json",
+        };
+  try {
+    const response = await fetch(llmEndpoint(config), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: config.model,
+        max_tokens: 1,
+        messages: [{ role: "user", content: "Reply with ok." }],
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new Error(
+        `Provider returned ${response.status}${detail ? `: ${detail.slice(0, 240)}` : ""}`,
+      );
+    }
+    return `Connected to ${config.provider} (${config.model}).`;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("The provider did not respond before the timeout.");
+    }
+    throw error instanceof Error ? error : new Error("Could not reach the provider.");
   } finally {
     clearTimeout(timer);
   }

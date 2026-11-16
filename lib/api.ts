@@ -5,7 +5,7 @@ import { getConfig } from "@/lib/config";
 import { getDb, type Database } from "@/lib/db";
 import { makeLLMConfig, providerDefaults, PROVIDERS, type LLMConfig } from "@/lib/parser/llm";
 import { secretStore } from "@/lib/secrets";
-import { defaultCheckBack, nowMs, parseWhen } from "@/lib/time";
+import { defaultCheckBack, normalizeTimezone, nowMs, parseWhen } from "@/lib/time";
 import {
   STAGES,
   TERMINAL_STAGES,
@@ -18,6 +18,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code?: string,
   ) {
     super(message);
   }
@@ -28,7 +29,10 @@ export async function handle(fn: () => Promise<Response> | Response): Promise<Re
     return await fn();
   } catch (error) {
     if (error instanceof ApiError) {
-      return NextResponse.json({ detail: error.message }, { status: error.status });
+      return NextResponse.json(
+        { detail: error.message, ...(error.code ? { code: error.code } : {}) },
+        { status: error.status },
+      );
     }
     console.error(error);
     return NextResponse.json(
@@ -68,16 +72,30 @@ export async function readBody<T>(req: NextRequest, schema: ZodType<T>): Promise
 
 export function userSettings(db: Database, userId: number): UserPreferences {
   const config = getConfig();
-  return {
-    parser_mode: "llm",
+  const stored = db.getUserSettings(userId) as Partial<UserPreferences>;
+  const merged: UserPreferences = {
+    parser_mode: "auto",
     default_follow_up_days: config.defaultFollowUpDays,
     timezone: config.appTimezone,
     notifications_enabled: true,
+    push_enabled: true,
+    digest_enabled: true,
+    digest_time: "08:00",
+    quiet_hours_start: "22:00",
+    quiet_hours_end: "07:00",
+    reminder_channel: "auto",
+    telegram_chat_id: "",
     llm_provider: (config.llmProvider as UserPreferences["llm_provider"]) || "openai",
     llm_base_url: "",
     llm_model: "",
-    ...(db.getUserSettings(userId) as Partial<UserPreferences>),
+    ...stored,
   };
+  merged.timezone = normalizeTimezone(merged.timezone);
+  return merged;
+}
+
+function sameEndpoint(a: string, b: string) {
+  return a.trim().replace(/\/+$/, "").toLowerCase() === b.trim().replace(/\/+$/, "").toLowerCase();
 }
 
 export function llmConfigFor(db: Database, userId: number): LLMConfig {
@@ -86,13 +104,18 @@ export function llmConfigFor(db: Database, userId: number): LLMConfig {
   const provider = (prefs.llm_provider || config.llmProvider || "openai").toLowerCase();
   const defaults = providerDefaults(provider);
   const envMatches = config.llmProvider === provider;
-  const apiKey = secretStore.get(`llm_api_key_${userId}`) || config.llmApiKey;
+  const baseUrl =
+    prefs.llm_base_url ||
+    (envMatches ? config.llmBaseUrl : "") ||
+    defaults.baseUrl;
+  const envBaseUrl = config.llmBaseUrl || defaults.baseUrl;
+  const envEndpointMatches = envMatches && sameEndpoint(baseUrl, envBaseUrl);
+  const apiKey =
+    secretStore.get(`llm_api_key_${userId}`) ||
+    (envEndpointMatches ? config.llmApiKey : "");
   return makeLLMConfig({
     provider,
-    baseUrl:
-      prefs.llm_base_url ||
-      (envMatches ? config.llmBaseUrl : "") ||
-      defaults.baseUrl,
+    baseUrl,
     apiKey,
     model:
       prefs.llm_model ||
@@ -113,7 +136,10 @@ export function applyStageSideEffects(
   current: Application,
 ): Record<string, unknown> {
   const stage = fields.stage as Stage | undefined;
-  if (stage && TERMINAL_STAGES.has(stage)) {
+  if (stage === "saved") {
+    fields.status ??= "active";
+    fields.closed_at ??= null;
+  } else if (stage && TERMINAL_STAGES.has(stage)) {
     fields.status ??= "closed";
     fields.closed_at ??= nowMs();
     fields.check_back_at ??= null;

@@ -24,15 +24,24 @@ No Gmail access, no inbox mirroring, and no background mailbox sync.
 - **Manual pipeline** — add a company/role once, then record outcomes
   (`rejected`, `offer`, `assessment`, `interview`, `followed up`,
   `no response`, `withdrawn`) as they happen.
-- **Paste an email, get a draft** — click **Paste & Draft**, paste the full
-  email, and the AI provider extracts company, role, stage, next action, and
-  response window. Dates like "within 2 weeks", "7–10 business days", and "by
-  January 20" become a concrete check-back.
-- **AI provider required** — OpenAI, Groq, xAI Grok, or Anthropic Claude. Add
-  the key once in Settings; it is encrypted at rest. Without a key, Paste &
-  Draft prompts you to connect a provider first.
-- **Reminders** — due check-backs and action deadlines appear in the dashboard,
-  can trigger browser notifications, and export to `.ics`.
+- **Drag between stages** — drag a card onto another kanban column. Keyboard
+  users can press Alt+Left/Right on a focused card, and every move has an Undo
+  action.
+- **Today agenda** — overdue, due today, and this week sit above the board with
+  one-tap Followed up, +1d/+3d/+7d snooze, and open actions.
+- **Undoable deletes** — deleting an application or a logged email moves it to
+  a seven-day trash; the toast offers Undo to restore it instantly.
+- **Paste an email, get a draft** — paste one email or a forwarded thread.
+  Rules extraction works with no API key; adding OpenAI, Groq, xAI Grok, or
+  Anthropic Claude improves ambiguous emails. Dates like "within 2 weeks",
+  "7–10 business days", and "by January 20" become a concrete check-back.
+- **Smarter drafts** — every preview field is editable inline with per-field
+  confidence. A fuzzy company/role/sender match offers "Update existing" so a
+  stage-change email does not create a duplicate card.
+- **Reminders that reach you** — due check-backs and deadlines appear in the
+  dashboard, trigger browser notifications, and can be delivered by Web Push
+  (VAPID) or Telegram. A daily digest runs at your chosen time, quiet hours are
+  respected, and each reminder stores its channel.
 - **Multi-user** — Google sign-in is identity only; every query is scoped to
   the signed-in `user_id`.
 
@@ -46,7 +55,7 @@ No Gmail access, no inbox mirroring, and no background mailbox sync.
 | Auth     | Google OAuth (`openid`/`email`/`profile` only) |
 | Storage  | SQLite via `node:sqlite` `DatabaseSync` |
 | Parser   | OpenAI/Grok/Claude (rules fallback available) |
-| Tests    | Vitest |
+| Tests    | Vitest + Playwright |
 
 ## Run it locally
 
@@ -58,7 +67,13 @@ npm run dev     # http://localhost:3000
 ```
 
 The database is created on first request at `data/lockedin.db`. To start from a
-clean slate, stop the server and delete the `data/` directory.
+clean slate, stop the server and delete the `data/` directory. You can also wipe
+only your own account and data from **Settings → Danger zone**.
+
+SQLite runs in WAL mode, so a safe backup must include `lockedin.db`,
+`lockedin.db-wal`, and `lockedin.db-shm` while the app is stopped (or use
+`sqlite3 lockedin.db ".backup backup.db"` for an online copy). Copying only the
+main `.db` file can miss recent writes.
 
 ### Google sign-in setup
 
@@ -72,21 +87,30 @@ clean slate, stop the server and delete the `data/` directory.
 If you only want to try the tracker locally, the app still works after sign-in
 is configured; there is no mailbox connection step.
 
-### AI parsing (required for Paste & Draft)
+### AI parsing (optional)
 
-In **Settings → Email parser & LLM**, choose a provider (**OpenAI**, **Groq**,
-**xAI Grok**, or **Anthropic Claude**), then add the API key. Base URL and model
-are pre-filled with that provider's defaults and remain editable for proxies or
-newer models. Parser mode defaults to `llm`, so Paste & Draft calls the provider
-API directly and asks it for one structured JSON object containing the company,
-role, stage/category, location, next action, check-back date, and deadline.
-Requests use `response_format` JSON schema where supported and fall back to JSON
-object mode; Claude uses `output_config.format`. Clicking Paste & Draft without
-a key shows a "Connect an AI provider first" prompt and opens this settings
-section. The `auto` mode keeps a deterministic rules fallback.
+Paste & Draft works immediately with deterministic rules. To improve ambiguous
+emails, open **Settings → Email parser & LLM**, choose a provider (**OpenAI**,
+**Groq**, **xAI Grok**, or **Anthropic Claude**), and add an API key. Base URL
+and model are pre-filled with that provider's defaults and remain editable for
+proxies or newer models. Parser mode defaults to `auto`, which calls the
+provider only when rules confidence is low and otherwise stays offline. `llm`
+forces AI when available, and `rules` never sends text anywhere. Without a key,
+every mode safely falls back to rules. LLM requests ask for one structured JSON
+object containing the company, role, stage/category, location, next action,
+check-back date, and deadline.
 
 Environment equivalents are `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`,
 `LLM_API_KEY`, and `LLM_TIMEOUT_SECONDS`.
+
+### Reminder delivery (optional)
+
+Web Push works out of the box: VAPID keys are generated and encrypted on first
+use. To pin them, set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and
+`VAPID_SUBJECT`. Set `RESEND_API_KEY` and `DIGEST_FROM` to email the daily
+digest through Resend; set `TELEGRAM_BOT_TOKEN` for Telegram delivery. The
+server sweeps due reminders every minute, deduplicates deliveries, skips quiet
+hours, and only pushes reminders due in the last 12 hours.
 
 ## Everyday flow
 
@@ -117,6 +141,12 @@ Environment equivalents are `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`,
 | `npm start` | Run the production build |
 | `npm run typecheck` | Run TypeScript without emitting |
 | `npm test` | Run the Vitest suite |
+| `npm run test:e2e` | Build and run the Playwright flows |
+
+Playwright needs a Chromium binary. Install it once with
+`npx playwright install chromium`, or point `PLAYWRIGHT_CHROMIUM_EXECUTABLE` at
+a system Chromium. E2E uses a throwaway `.e2e-data/` database and starts the
+production build on port 3100.
 
 ## API
 
@@ -199,5 +229,5 @@ lib/
   calendar.ts          ICS export + notification feed
   api.ts, schemas.ts   Route helpers and Zod validation
 public/                Service worker and icon
-tests/                 Vitest suite
+tests/                 Vitest suite + Playwright flows
 ```

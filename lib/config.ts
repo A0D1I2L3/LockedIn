@@ -33,6 +33,12 @@ export function getConfig() {
     llmModel: (process.env.LLM_MODEL || "").trim(),
     llmApiKey: (process.env.LLM_API_KEY || "").trim(),
     llmTimeoutSeconds: Number(process.env.LLM_TIMEOUT_SECONDS || 20) || 20,
+    vapidPublicKey: (process.env.VAPID_PUBLIC_KEY || "").trim(),
+    vapidPrivateKey: (process.env.VAPID_PRIVATE_KEY || "").trim(),
+    vapidSubject: (process.env.VAPID_SUBJECT || "mailto:reminders@lockedin.local").trim(),
+    resendApiKey: (process.env.RESEND_API_KEY || "").trim(),
+    digestFrom: (process.env.DIGEST_FROM || "LockedIn <onboarding@resend.dev>").trim(),
+    telegramBotToken: (process.env.TELEGRAM_BOT_TOKEN || "").trim(),
   };
 }
 

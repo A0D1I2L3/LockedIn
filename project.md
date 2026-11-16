@@ -17,11 +17,13 @@ sync, no Gmail API dependency, and no stored Google tokens.
 
 Core product decisions:
 - The pipeline is **manual first, parsed second**. Every parsed field is
-  editable before or after saving.
+  editable inline in the preview and after saving. Parser drafts fuzzy-match
+  existing applications and offer "Update existing" to prevent duplicates.
 - Classification prefers precision over recall: unknown text becomes
   `applied` with low confidence, never a confident wrong stage.
-- Rules are always available. Parser mode defaults to `llm`, so the provider is
-  the primary extractor; `auto` keeps a rules fallback for low confidence.
+- Rules are always available and work with no API key. Parser mode defaults to
+  `auto`: rules first, LLM only for low-confidence drafts. `llm` prefers the
+  provider and `rules` stays fully offline.
 - Per-user isolation is enforced in every SQL query via `user_id`.
 - The frontend is React + Tailwind inside the Next.js app; API routes are
   colocated under `app/api/`.
@@ -37,13 +39,14 @@ Core product decisions:
 | Storage  | SQLite via `node:sqlite` `DatabaseSync` |
 | Parser   | Rules + optional OpenAI / xAI Grok / Anthropic Claude |
 | Secrets  | AES-256-GCM JSON store under `data/` |
-| Tests    | Vitest |
+| Tests    | Vitest + Playwright |
 
 ```bash
 npm install
 npm run dev       # http://localhost:3000
 npm run typecheck
-npm test          # 17 tests
+npm test          # 48 tests
+npm run test:e2e  # Playwright (needs Chromium)
 npm run build
 ```
 
@@ -69,7 +72,7 @@ Next.js route handlers (app/api/**)
         │
         ▼
    SQLite (lib/db.ts)
-     users, applications, emails, reminders, events, user_settings
+     users, applications, emails, reminders, events, user_settings, trash
 ```
 
 On create/update/outcome/snooze, `reminders.syncApplicationReminders()` cancels
@@ -102,9 +105,9 @@ pending reminders for that application and recreates:
 | `lib/schemas.ts` | Zod request schemas |
 | `app/api/**/route.ts` | HTTP endpoints |
 | `app/oauth/**/route.ts` | Google identity flow |
-| `components/` | Dashboard, detail/application/settings modals, shared UI |
+| `components/` | Dashboard, board/card views, modals, shared UI |
 | `public/sw.js` | Service worker for notifications |
-| `tests/` | Vitest suite |
+| `tests/` | Vitest suite + Playwright flows |
 
 ## 5. Domain model
 
@@ -173,21 +176,29 @@ they return `null` and rules win.
 
 ## 7. Database schema
 
-- `users(id, google_user_id UNIQUE, email, created_at)`
+- `users(id, google_user_id UNIQUE, email, created_at INTEGER ms)`
 - `applications(id TEXT PK, user_id, company, role, location, job_url, source,
   stage, status, action_state, next_action, next_action_at, check_back_at,
   check_back_source, applied_at, last_contact_at, follow_up_count, notes,
-  created_at, updated_at, closed_at)`
+  created_at, updated_at, closed_at)` with CHECK constraints/triggers for
+  `stage`, `status`, and `action_state`.
 - `emails(id TEXT PK, user_id, application_id, subject, from_email,
-  received_at, raw_text, parsed_json, confidence, parser_version, created_at)`
+  received_at, raw_text, raw_hash, parsed_json, confidence, parser_version,
+  created_at)`; `raw_hash` dedupes repeated pastes per application.
 - `reminders(id TEXT PK, user_id, application_id, kind, due_at, title, body,
   status, payload_json, created_at, completed_at)`
 - `events(id TEXT PK, user_id, application_id, type, data_json, created_at)`
 - `user_settings(user_id PK, data JSON)`
+- `trash(id TEXT PK, user_id, kind CHECK(application|email), data_json,
+  created_at)`; snapshots deleted applications/emails (with events, reminders)
+  for restore, auto-pruned after seven days.
 
-There is no formal migration framework. `SCHEMA` uses `CREATE TABLE IF NOT
-EXISTS`. The fresh database lives at `data/lockedin.db`; the old Python/Gmail
-database was intentionally not migrated.
+`SCHEMA` uses `CREATE TABLE IF NOT EXISTS` plus additive startup migrations
+(user timestamps converted to ms, `emails.raw_hash` backfilled, composite
+indexes, legacy-row cleanup, and guard triggers). The fresh database lives at
+`data/lockedin.db`; the old Python/Gmail database was intentionally not
+migrated. SQLite runs in WAL mode: back up `lockedin.db`, `-wal`, and `-shm`
+together while stopped, or use `sqlite3 .backup`.
 
 ## 8. API surface
 
@@ -195,7 +206,11 @@ database was intentionally not migrated.
 |---|---|
 | `GET /api/health` | liveness |
 | `GET /api/me`, `GET /api/status` | session + counts |
-| `GET/POST /api/settings` | User prefs and LLM config |
+| `GET/POST /api/settings` | User prefs, quiet hours, digest, LLM config |
+| `GET/POST/DELETE /api/push` | VAPID key, subscribe, unsubscribe |
+| `POST /api/push/test` | Send a test push to this user's devices |
+| `POST /api/settings/test` | Test the configured LLM endpoint |
+| `DELETE /api/me` | Delete the signed-in user and all their data |
 | `GET /oauth/login`, `GET /oauth/callback` | identity flow |
 | `POST /api/logout` | clear cookie |
 | `GET/POST /api/applications` | list/filter/create |
@@ -204,6 +219,8 @@ database was intentionally not migrated.
 | `POST /api/applications/{id}/snooze` | push dates out |
 | `POST /api/parse-email` | preview draft |
 | `GET/POST /api/applications/{id}/emails` | list/attach parsed email |
+| `DELETE /api/applications/{id}/emails/{emailId}` | delete a logged email (undoable) |
+| `POST /api/trash/{id}/restore` | restore a trashed application/email |
 | `GET /api/applications/{id}/timeline` | events + emails |
 | `GET /api/applications/{id}/calendar.ics` | per-app ICS |
 | `GET /api/due`, `/api/notifications` | reminder feeds |
@@ -223,7 +240,9 @@ Tailwind + TypeScript on npm, with a **fresh database** and no data migration.
   `.venv`, and the old Gmail-era database.
 - Added: `lib/` data/auth/parser modules, `app/api` route handlers, OAuth
   routes, React dashboard and modals, service worker, ICS export, Vitest suite.
-- `npm test`: 17 passing (`parser`, `llm`, `db`).
+- `npm test`: 52 passing (`parser`, `llm`, `db`, `validation`, `time`, `agenda`,
+  `reminders`, `notify`).
+- `npm run test:e2e`: 7 Playwright flows against a seeded production build.
 - `npm run typecheck` and `npm run build` should stay clean.
 
 Known limitations:

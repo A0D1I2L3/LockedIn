@@ -33,7 +33,7 @@ function event(options: {
   summary: string;
   description?: string;
   url?: string;
-  alarmMinutes?: number | null;
+  alarmMinutes?: number[];
 }): string[] {
   const lines = [
     "BEGIN:VEVENT",
@@ -45,12 +45,12 @@ function event(options: {
   ];
   if (options.description) lines.push(`DESCRIPTION:${escapeIcs(options.description)}`);
   if (options.url) lines.push(`URL:${escapeIcs(options.url)}`);
-  if (options.alarmMinutes !== null && options.alarmMinutes !== undefined) {
+  for (const minutes of options.alarmMinutes || []) {
     lines.push(
       "BEGIN:VALARM",
       "ACTION:DISPLAY",
       `DESCRIPTION:${escapeIcs(options.summary)}`,
-      `TRIGGER:-PT${Math.trunc(options.alarmMinutes)}M`,
+      `TRIGGER:-PT${Math.trunc(minutes)}M`,
       "END:VALARM",
     );
   }
@@ -62,6 +62,18 @@ export function applicationEvents(app: Application, baseUrl = ""): string[][] {
   const label = `${app.company || "Application"}${app.role ? ` — ${app.role}` : ""}`;
   const link = baseUrl ? new URL(`?application=${encodeURIComponent(app.id)}`, `${baseUrl}/`).toString() : "";
   const events: string[][] = [];
+  if (app.apply_by) {
+    events.push(
+      event({
+        uid: `apply-${app.id}@internship-dashboard`,
+        startMs: app.apply_by,
+        summary: `Apply by: ${label}`,
+        description: "Application deadline. Apply now or archive this role.",
+        url: link,
+        alarmMinutes: [1440, 60],
+      }),
+    );
+  }
   if (app.check_back_at) {
     events.push(
       event({
@@ -70,7 +82,7 @@ export function applicationEvents(app: Application, baseUrl = ""): string[][] {
         summary: `Check in: ${label}`,
         description: app.next_action || "Open the tracker and update this application.",
         url: link,
-        alarmMinutes: 0,
+        alarmMinutes: [1440, 60],
       }),
     );
   }
@@ -82,7 +94,7 @@ export function applicationEvents(app: Application, baseUrl = ""): string[][] {
         summary: `${app.next_action || "Action due"}: ${label}`,
         description: `Stage: ${app.stage}`,
         url: link,
-        alarmMinutes: 60,
+        alarmMinutes: [1440, 60],
       }),
     );
   }

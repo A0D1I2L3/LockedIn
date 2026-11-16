@@ -42,6 +42,8 @@ export async function POST(req: NextRequest) {
     const timezone = prefs.timezone || "UTC";
     const stage = validateStage(body.stage) || "applied";
     const checkBackAt = parseWhenFor(body.check_back_at, timezone);
+    const applyBy = parseWhenFor(body.apply_by, timezone);
+    const saved = stage === "saved";
 
     const data: Record<string, unknown> = {
       company: body.company,
@@ -53,11 +55,12 @@ export async function POST(req: NextRequest) {
       status: "active",
       next_action: body.next_action,
       notes: body.notes,
-      applied_at: parseWhenFor(body.applied_at, timezone) || nowMs(),
+      apply_by: applyBy,
+      applied_at: parseWhenFor(body.applied_at, timezone) || (saved ? null : nowMs()),
       check_back_at:
         checkBackAt ||
-        defaultCheckBackFor(Number(prefs.default_follow_up_days || 7), timezone),
-      check_back_source: body.check_back_source || (checkBackAt ? "manual" : "default"),
+        (saved ? null : defaultCheckBackFor(Number(prefs.default_follow_up_days || 7), timezone)),
+      check_back_source: body.check_back_source || (checkBackAt ? "manual" : saved ? "none" : "default"),
       next_action_at: parseWhenFor(body.next_action_at, timezone),
     };
     if (TERMINAL_STAGES.has(stage)) {
@@ -66,7 +69,8 @@ export async function POST(req: NextRequest) {
       data.check_back_at = null;
     }
     if (!data.next_action) {
-      data.next_action = stage === "applied" ? "Wait for a response" : "";
+      if (saved) data.next_action = applyBy ? "Apply before the deadline" : "Decide whether to apply";
+      else data.next_action = stage === "applied" ? "Wait for a response" : "";
     }
 
     const created = db.createApplication(userId, data);

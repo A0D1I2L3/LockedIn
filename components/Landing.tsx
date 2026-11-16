@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/client";
-import { Icon } from "@/components/ui";
 import LiquidChrome from "./LiquidChrome";
 
 interface StatusPayload {
@@ -39,6 +38,30 @@ export function Landing() {
   const [status, setStatus] = useState<StatusPayload | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [showChrome, setShowChrome] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => {
+      let webgl = false;
+      try {
+        const canvas = document.createElement("canvas");
+        webgl = Boolean(canvas.getContext("webgl2"));
+      } catch {
+        webgl = false;
+      }
+      setShowChrome(!media.matches && webgl);
+    };
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
+
+  useEffect(() => {
+    const onPageShow = () => setConnecting(false);
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,28 +97,32 @@ export function Landing() {
     window.location.href = "/oauth/login";
   }
 
+  const pending = status === null || connecting;
+
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-base font-manrope text-cream">
-      {/* Full-screen LiquidChrome background */}
-      <div className="fixed inset-0 z-0">
-        <LiquidChrome
-          color="#76C0EC"
-          speed={0.14}
-          amplitude={0.22}
-          detail={3}
-          thickness={1.15}
-          interactive
-          frequencyX={2.5}
-          frequencyY={2.5}
-          depth={1}
-          roughness={0.2}
-          exposure={1}
-          rippleStrength={1}
-          rippleSize={1}
-          tilt={1}
-          intro
-          lightMode={false}
-        />
+      {/* Full-screen background: static gradient fallback for reduced motion or no WebGL. */}
+      <div className="fixed inset-0 z-0 bg-[radial-gradient(circle_at_30%_20%,#1b3352_0%,#0e131f_45%,#070b13_100%)]">
+        {showChrome && (
+          <LiquidChrome
+            color="#76C0EC"
+            speed={0.14}
+            amplitude={0.22}
+            detail={3}
+            thickness={1.15}
+            interactive
+            frequencyX={2.5}
+            frequencyY={2.5}
+            depth={1}
+            roughness={0.2}
+            exposure={1}
+            rippleStrength={1}
+            rippleSize={1}
+            tilt={1}
+            intro
+            lightMode={false}
+          />
+        )}
       </div>
 
       {/* main ignores the mouse so the chrome stays interactive;
@@ -124,13 +151,16 @@ export function Landing() {
             <button
               type="button"
               onClick={startSignIn}
+              disabled={pending}
               aria-label="Continue with Google"
-              className="relative flex items-center justify-center gap-3.5 rounded-full border border-[#76C0EC]/30 bg-[#0d111c] px-8 py-3.5 text-sm font-semibold text-[#FFF6DC] shadow-lg transition-all duration-300 hover:bg-[#161c2d] active:scale-[0.98]"
+              className="relative flex items-center justify-center gap-3.5 rounded-full border border-[#76C0EC]/30 bg-[#0d111c] px-8 py-3.5 text-sm font-semibold text-[#FFF6DC] shadow-lg transition-all duration-300 hover:bg-[#161c2d] active:scale-[0.98] disabled:cursor-wait disabled:opacity-80"
             >
-              {connecting ? (
+              {pending ? (
                 <>
                   <span className="h-5 w-5 animate-spin rounded-full border-2 border-cyan/30 border-t-cyan" />
-                  <span className="tracking-wide">Connecting…</span>
+                  <span className="tracking-wide">
+                    {status === null ? "Checking…" : "Connecting…"}
+                  </span>
                 </>
               ) : (
                 <>

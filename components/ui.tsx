@@ -1,18 +1,40 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { STAGE_LABELS, type Stage } from "@/lib/types";
 
 const STAGE_META: Record<
   Stage,
-  { label: string; pill: string; dot: string; text: string; avatar: string }
+  {
+    label: string;
+    pill: string;
+    dot: string;
+    text: string;
+    avatar: string;
+    border: string;
+    hover: string;
+    glow: string;
+  }
 > = {
+  saved: {
+    label: "Saved",
+    pill: "bg-stage-saved/20 text-stage-saved",
+    dot: "bg-stage-saved",
+    text: "text-stage-saved",
+    avatar: "bg-stage-saved/20 text-stage-saved",
+    border: "border-stage-saved/30",
+    hover: "hover:border-stage-saved",
+    glow: "shadow-[0_0_8px_rgba(34,211,238,0.45)]",
+  },
   applied: {
     label: "Applied",
     pill: "bg-stage-applied/20 text-stage-applied",
     dot: "bg-stage-applied",
     text: "text-stage-applied",
     avatar: "bg-stage-applied/20 text-stage-applied",
+    border: "border-stage-applied/30",
+    hover: "hover:border-stage-applied",
+    glow: "shadow-[0_0_8px_rgba(96,165,250,0.4)]",
   },
   assessment: {
     label: "Assessment",
@@ -20,6 +42,9 @@ const STAGE_META: Record<
     dot: "bg-stage-assessment",
     text: "text-stage-assessment",
     avatar: "bg-stage-assessment/20 text-stage-assessment",
+    border: "border-stage-assessment/30",
+    hover: "hover:border-stage-assessment",
+    glow: "shadow-[0_0_8px_rgba(245,158,11,0.45)]",
   },
   interview: {
     label: "Interviewing",
@@ -27,6 +52,9 @@ const STAGE_META: Record<
     dot: "bg-stage-interview",
     text: "text-stage-interview",
     avatar: "bg-stage-interview/20 text-stage-interview",
+    border: "border-stage-interview/30",
+    hover: "hover:border-stage-interview",
+    glow: "shadow-[0_0_8px_rgba(168,85,247,0.45)]",
   },
   offer: {
     label: "Offer",
@@ -34,6 +62,9 @@ const STAGE_META: Record<
     dot: "bg-stage-offer",
     text: "text-stage-offer",
     avatar: "bg-stage-offer/20 text-stage-offer",
+    border: "border-stage-offer/30",
+    hover: "hover:border-stage-offer",
+    glow: "shadow-[0_0_8px_rgba(16,185,129,0.5)]",
   },
   rejected: {
     label: "Rejected",
@@ -41,6 +72,9 @@ const STAGE_META: Record<
     dot: "bg-stage-rejected",
     text: "text-stage-rejected",
     avatar: "bg-stage-rejected/20 text-stage-rejected",
+    border: "border-stage-rejected/30",
+    hover: "hover:border-stage-rejected",
+    glow: "shadow-[0_0_8px_rgba(239,68,68,0.4)]",
   },
   withdrawn: {
     label: "Withdrawn",
@@ -48,11 +82,24 @@ const STAGE_META: Record<
     dot: "bg-stage-withdrawn",
     text: "text-stage-withdrawn",
     avatar: "bg-stage-withdrawn/20 text-stage-withdrawn",
+    border: "border-stage-withdrawn/30",
+    hover: "hover:border-stage-withdrawn",
+    glow: "",
   },
 };
 
 export function stageMeta(stage: Stage) {
   return STAGE_META[stage] || STAGE_META.applied;
+}
+
+export function safeHttpUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 export function Icon({ name, className = "" }: { name: string; className?: string }) {
@@ -92,40 +139,109 @@ export function EmptyState({ message, icon = "inbox" }: { message: string; icon?
   );
 }
 
+let bodyLockCount = 0;
+let previousBodyOverflow = "";
+
+function lockBodyScroll() {
+  if (bodyLockCount === 0) previousBodyOverflow = document.body.style.overflow;
+  bodyLockCount += 1;
+  document.body.style.overflow = "hidden";
+}
+
+function unlockBodyScroll() {
+  bodyLockCount = Math.max(0, bodyLockCount - 1);
+  if (bodyLockCount === 0) document.body.style.overflow = previousBodyOverflow;
+}
+
+const FOCUSABLE_SELECTOR =
+  "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])";
+
+function focusableElements(panel: HTMLElement) {
+  return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (element) => !element.hasAttribute("disabled") && element.getAttribute("aria-hidden") !== "true",
+  );
+}
+
 export function Modal({
   open,
   onClose,
   children,
   className = "",
+  position = "center",
 }: {
   open: boolean;
   onClose: () => void;
   children: ReactNode;
   className?: string;
+  position?: "center" | "right";
 }) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     if (!open) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !panelRef.current) return;
+      const focusable = focusableElements(panelRef.current);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        panelRef.current.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (!panelRef.current.contains(active)) {
+        event.preventDefault();
+        first.focus();
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener("keydown", onKey);
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    lockBodyScroll();
+    const frame = requestAnimationFrame(() => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      (focusableElements(panel)[0] || panel).focus();
+    });
     return () => {
+      cancelAnimationFrame(frame);
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = previous;
+      unlockBodyScroll();
+      previousFocus?.focus?.();
     };
   }, [open, onClose]);
 
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-surface-base/80 p-4 backdrop-blur-md"
+      className={`fixed inset-0 z-50 flex bg-surface-base/80 backdrop-blur-md ${
+        position === "right" ? "items-stretch justify-end" : "items-center justify-center p-4"
+      }`}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className={`max-h-[92vh] w-full overflow-y-auto ${className}`}>{children}</div>
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
+        className={`w-full outline-none ${
+          position === "right" ? "h-full" : "max-h-[92vh] overflow-y-auto"
+        } ${className}`}
+      >
+        {children}
+      </div>
     </div>
   );
 }
@@ -141,7 +257,13 @@ export function SpinnerLabel({ label }: { label: string }) {
 
 export function fmtDate(ms: number | null | undefined) {
   if (!ms) return "—";
-  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const date = new Date(ms);
+  const withYear = date.getFullYear() !== new Date().getFullYear();
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(withYear ? { year: "numeric" } : {}),
+  });
 }
 
 export function fmtDateTime(ms: number | null | undefined) {
@@ -162,15 +284,28 @@ export function dateInputValue(ms: number | null | undefined) {
   return new Date(ms - offset).toISOString().slice(0, 10);
 }
 
+function localDayNumber(ms: number) {
+  const date = new Date(ms);
+  return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000);
+}
+
 export function relative(ms: number | null | undefined) {
   if (!ms) return "";
-  const days = Math.round((Number(ms) - Date.now()) / 86_400_000);
+  const days = localDayNumber(Number(ms)) - localDayNumber(Date.now());
   if (days < -1) return `${Math.abs(days)}d overdue`;
   if (days === -1) return "yesterday";
   if (days === 0) return "today";
   if (days === 1) return "tomorrow";
   if (days < 7) return `in ${days}d`;
   return fmtDate(ms);
+}
+
+export function daysAgo(ms: number | null | undefined) {
+  if (!ms) return "—";
+  const days = localDayNumber(Date.now()) - localDayNumber(Number(ms));
+  if (days <= 0) return "today";
+  if (days === 1) return "1d ago";
+  return `${days}d ago`;
 }
 
 export function EventIcon({ type }: { type: string }) {

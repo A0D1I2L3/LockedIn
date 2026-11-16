@@ -17,12 +17,42 @@ export function syncApplicationReminders(
   if (app.status !== "active" || TERMINAL.has(app.stage)) return [];
 
   const now = nowMs();
+  const prefs = db.getUserSettings(userId) as { reminder_channel?: Reminder["channel"] };
+  const channel = prefs.reminder_channel || "auto";
   const created: Reminder[] = [];
+
+  if (app.apply_by) {
+    created.push(
+      db.addReminder(userId, app.id, {
+        kind: "deadline",
+        channel,
+        due_at: app.apply_by,
+        title: title(app, "Apply by"),
+        body: "The application deadline is here. Apply now or archive this role.",
+        payload: { offset: "apply_by", stage: app.stage },
+      }),
+    );
+    for (const days of [3, 1]) {
+      const dueAt = app.apply_by - days * MS_PER_DAY;
+      if (dueAt <= now || dueAt >= app.apply_by) continue;
+      created.push(
+        db.addReminder(userId, app.id, {
+          kind: "deadline",
+          channel,
+          due_at: dueAt,
+          title: title(app, `Apply in ${days} day${days === 1 ? "" : "s"}`),
+          body: "Application deadline approaching.",
+          payload: { offset: `apply_by_${days}`, stage: app.stage },
+        }),
+      );
+    }
+  }
 
   if (app.check_back_at) {
     created.push(
       db.addReminder(userId, app.id, {
         kind: "check_back",
+        channel,
         due_at: app.check_back_at,
         title: title(app, "Check in"),
         body: "Time to check back. Update the stage or snooze if you are still waiting.",
@@ -46,6 +76,7 @@ export function syncApplicationReminders(
     created.push(
       db.addReminder(userId, app.id, {
         kind,
+        channel,
         due_at: app.next_action_at,
         title: title(app, label),
         body: app.next_action || "Open the application for details.",
@@ -57,6 +88,7 @@ export function syncApplicationReminders(
       created.push(
         db.addReminder(userId, app.id, {
           kind,
+          channel,
           due_at: dueAt,
           title: title(app, `${label} (${offsetLabel})`),
           body: app.next_action || "",
@@ -82,6 +114,20 @@ export function dueItems(db: Database, userId: number, now = nowMs()): Notificat
   const covered = new Set<string>();
 
   for (const app of applications.values()) {
+    if (app.apply_by && app.apply_by <= now) {
+      covered.add(`${app.id}:apply_by`);
+      items.push({
+        kind: "apply_by",
+        application_id: app.id,
+        company: app.company,
+        role: app.role,
+        stage: app.stage,
+        due_at: app.apply_by,
+        title: title(app, "Apply by"),
+        body: "The application deadline is due.",
+        reminder_id: null,
+      });
+    }
     if (app.check_back_at && app.check_back_at <= now) {
       covered.add(`${app.id}:check_back`);
       items.push({
@@ -116,6 +162,7 @@ export function dueItems(db: Database, userId: number, now = nowMs()): Notificat
     const app = applications.get(reminder.application_id);
     if (!app) continue;
     const offset = String(reminder.payload.offset || "");
+    if (offset === "apply_by" && covered.has(`${reminder.application_id}:apply_by`)) continue;
     if (offset === "main" && covered.has(`${reminder.application_id}:${reminder.kind}`)) continue;
     items.push({
       kind: reminder.kind,
@@ -144,6 +191,7 @@ export function upcomingItems(
   const seen = new Set<string>();
   for (const app of db.listApplications(userId, { status: "active", limit: 1000 })) {
     const entries: Array<[number | null, string, string]> = [
+      [app.apply_by, "apply_by", "Apply by"],
       [app.check_back_at, "check_back", "Check in"],
       [app.next_action_at, "action", "Action"],
     ];

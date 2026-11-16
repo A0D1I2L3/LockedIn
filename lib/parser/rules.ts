@@ -195,7 +195,7 @@ export function normalizeStage(value: string): Stage {
     rejection: "rejected", rejected: "rejected", other: "applied",
   };
   const normalized = (value || "").trim().toLowerCase();
-  if (["applied", "assessment", "interview", "offer", "rejected", "withdrawn"].includes(normalized)) {
+  if (["saved", "applied", "assessment", "interview", "offer", "rejected", "withdrawn"].includes(normalized)) {
     return normalized as Stage;
   }
   return aliases[normalized] || "applied";

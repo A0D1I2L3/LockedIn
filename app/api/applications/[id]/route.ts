@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { syncApplicationReminders } from "@/lib/reminders";
 import { applicationPatchSchema } from "@/lib/schemas";
+import { nowMs } from "@/lib/time";
 import { TERMINAL_STAGES } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -44,15 +45,15 @@ export async function PATCH(req: NextRequest, context: Context) {
       Object.entries(body).filter(([, value]) => value !== undefined),
     );
     if ("stage" in fields) fields.stage = validateStage(fields.stage as string) || current.stage;
-    for (const key of ["applied_at", "check_back_at", "next_action_at"]) {
+    for (const key of ["applied_at", "check_back_at", "next_action_at", "apply_by"]) {
       if (key in fields) fields[key] = parseWhenFor(fields[key], timezone);
     }
     applyStageSideEffects(fields, current);
     const nextStage = fields.stage as typeof current.stage | undefined;
     if (
       nextStage &&
-      !TERMINAL_STAGES.has(nextStage) &&
-      current.status === "closed" &&
+      nextStage !== "saved" &&
+      (current.status === "closed" || current.stage === "saved") &&
       !fields.check_back_at
     ) {
       fields.check_back_at = defaultCheckBackFor(
@@ -60,6 +61,15 @@ export async function PATCH(req: NextRequest, context: Context) {
         timezone,
       );
       fields.check_back_source = "default";
+    }
+    if (
+      nextStage &&
+      nextStage !== "saved" &&
+      current.stage === "saved" &&
+      !current.applied_at &&
+      fields.applied_at === undefined
+    ) {
+      fields.applied_at = nowMs();
     }
     const updated = db.updateApplication(userId, id, fields);
     if (!updated) {
@@ -78,7 +88,8 @@ export async function DELETE(req: NextRequest, context: Context) {
     if (!db.getApplication(userId, id)) {
       return NextResponse.json({ detail: "Application not found" }, { status: 404 });
     }
-    db.deleteApplication(userId, id);
-    return NextResponse.json({ ok: true, id });
+    const trashId = db.trashApplication(userId, id);
+    if (!trashId) throw new ApiError(404, "Application not found");
+    return NextResponse.json({ ok: true, id, trash_id: trashId });
   });
 }

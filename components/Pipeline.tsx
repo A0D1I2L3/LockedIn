@@ -1,8 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/client";
+import { ApiClientError, api } from "@/lib/client";
 import type {
   Application,
   NotificationItem,
@@ -11,20 +18,28 @@ import type {
   Stats,
   UserPreferences,
 } from "@/lib/types";
-import { STAGE_LABELS } from "@/lib/types";
+import { STAGE_LABELS, TERMINAL_STAGES } from "@/lib/types";
 import { ApplicationModal } from "@/components/ApplicationModal";
 import { DetailModal } from "@/components/DetailModal";
 import { SettingsModal } from "@/components/SettingsModal";
 import {
-  CompanyAvatar,
-  EmptyState,
-  Icon,
-  Modal,
-  SpinnerLabel,
-  StageBadge,
-  fmtDate,
-  relative,
-} from "@/components/ui";
+  BoardCard,
+  CadenceDrawer,
+  ListView,
+  ParserInputModal,
+  ParserPreview,
+  SummaryDot,
+  Toast,
+  TodayAgenda,
+} from "@/components/PipelineViews";
+import {
+  agendaBuckets,
+  columnMeta,
+  compareUrgency,
+  isOverdue,
+  splitEmailThread,
+} from "@/components/pipeline-utils";
+import { Icon } from "@/components/ui";
 
 interface StatusPayload {
   authenticated: boolean;
@@ -46,85 +61,20 @@ interface Feed {
 }
 
 const EMPTY_STATS: Stats = {
-  by_stage: { applied: 0, assessment: 0, interview: 0, offer: 0, rejected: 0, withdrawn: 0 },
+  by_stage: { saved: 0, applied: 0, assessment: 0, interview: 0, offer: 0, rejected: 0, withdrawn: 0 },
   total: 0,
   active: 0,
   due: 0,
   upcoming: 0,
 };
 
-const BOARD_STAGES: Stage[] = ["applied", "assessment", "interview", "offer"];
-
-const COLUMN_META: Record<
-  Stage,
-  { dot: string; glow: string; pill: string; border: string; hover: string; text: string }
-> = {
-  applied: {
-    dot: "bg-[#60A5FA]",
-    glow: "shadow-[0_0_8px_rgba(96,165,250,0.4)]",
-    pill: "text-[#93C5FD] bg-[#60A5FA]/15 border-[#60A5FA]/30",
-    border: "border-[#60A5FA]/30",
-    hover: "hover:border-[#60A5FA]",
-    text: "text-[#93C5FD]",
-  },
-  assessment: {
-    dot: "bg-[#F59E0B]",
-    glow: "shadow-[0_0_8px_rgba(245,158,11,0.45)]",
-    pill: "text-[#FCD34D] bg-[#F59E0B]/15 border-[#F59E0B]/35",
-    border: "border-[#F59E0B]/30",
-    hover: "hover:border-[#F59E0B]",
-    text: "text-[#FCD34D]",
-  },
-  interview: {
-    dot: "bg-[#A855F7]",
-    glow: "shadow-[0_0_8px_rgba(168,85,247,0.45)]",
-    pill: "text-[#D8B4FE] bg-[#A855F7]/15 border-[#A855F7]/35",
-    border: "border-[#A855F7]/30",
-    hover: "hover:border-[#A855F7]",
-    text: "text-[#C084FC]",
-  },
-  offer: {
-    dot: "bg-[#10B981]",
-    glow: "shadow-[0_0_8px_rgba(16,185,129,0.5)]",
-    pill: "text-[#34D399] bg-[#10B981]/15 border-[#10B981]/35",
-    border: "border-[#10B981]/30",
-    hover: "hover:border-[#10B981]",
-    text: "text-[#34D399]",
-  },
-  rejected: {
-    dot: "bg-[#EF4444]",
-    glow: "shadow-[0_0_8px_rgba(239,68,68,0.4)]",
-    pill: "text-[#FF95A5] bg-[#EF4444]/15 border-[#EF4444]/30",
-    border: "border-[#EF4444]/30",
-    hover: "hover:border-[#EF4444]",
-    text: "text-[#FF95A5]",
-  },
-  withdrawn: {
-    dot: "bg-[#94A3B8]",
-    glow: "",
-    pill: "text-[#CBD5E1] bg-[#94A3B8]/15 border-[#94A3B8]/30",
-    border: "border-[#94A3B8]/30",
-    hover: "hover:border-[#94A3B8]",
-    text: "text-[#CBD5E1]",
-  },
-};
-
-function daysAgo(ms: number | null | undefined) {
-  if (!ms) return "—";
-  const days = Math.max(0, Math.floor((Date.now() - ms) / 86_400_000));
-  if (days === 0) return "today";
-  if (days === 1) return "1d ago";
-  return `${days}d ago`;
-}
-
-function dateKey(ms: number) {
-  const date = new Date(ms);
-  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-}
+const BOARD_STAGES: Stage[] = ["saved", "applied", "assessment", "interview", "offer"];
 
 export function Pipeline() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [connectionError, setConnectionError] = useState("");
   const [status, setStatus] = useState<StatusPayload | null>(null);
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
   const [stats, setStats] = useState<Stats>(EMPTY_STATS);
@@ -137,6 +87,10 @@ export function Pipeline() {
   const [parseError, setParseError] = useState("");
   const [parsing, setParsing] = useState(false);
   const [draft, setDraft] = useState<ParsedDraft | null>(null);
+  const [draftRaw, setDraftRaw] = useState("");
+  const [draftQueue, setDraftQueue] = useState<Array<{ draft: ParsedDraft; raw: string }>>([]);
+  const [draftIndex, setDraftIndex] = useState(0);
+  const [parseMode, setParseMode] = useState("auto");
   const [parserOpen, setParserOpen] = useState(false);
   const [parserInputOpen, setParserInputOpen] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
@@ -149,16 +103,27 @@ export function Pipeline() {
   const [initialStage, setInitialStage] = useState<Stage | undefined>(undefined);
   const [initialDraft, setInitialDraft] = useState<ParsedDraft | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ message: string; tone: "success" | "error" } | null>(null);
+  const [detailRefresh, setDetailRefresh] = useState(0);
+  const [toast, setToast] = useState<{
+    message: string;
+    tone: "success" | "error";
+    action?: { label: string; onClick: () => void };
+  } | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragOverStage, setDragOverStage] = useState<Stage | null>(null);
   const [notificationPermission, setNotificationPermission] = useState("default");
 
   const notify = useCallback((message: string, tone: "success" | "error" = "success") => {
     setToast({ message, tone });
   }, []);
 
+  const notifyUndo = useCallback((message: string, onClick: () => void) => {
+    setToast({ message, tone: "success", action: { label: "Undo", onClick } });
+  }, []);
+
   useEffect(() => {
     if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 3200);
+    const timer = setTimeout(() => setToast(null), toast.action ? 7000 : 3200);
     return () => clearTimeout(timer);
   }, [toast]);
 
@@ -168,10 +133,17 @@ export function Pipeline() {
     return () => clearTimeout(timer);
   }, [aiPrompt]);
 
+  useEffect(() => {
+    const saved = settings?.preferences?.parser_mode;
+    if (saved) setParseMode(saved);
+  }, [settings?.preferences?.parser_mode]);
+
   const settingsRef = useRef<SettingsPayload | null>(null);
   settingsRef.current = settings;
+  const firstFeedRef = useRef(true);
+  const notifyInFlightRef = useRef(false);
 
-  const maybeNotify = useCallback((items: NotificationItem[]) => {
+  const maybeNotify = useCallback(async (items: NotificationItem[], batch = false) => {
     if (typeof window === "undefined" || !("Notification" in window)) return;
     if (Notification.permission !== "granted") return;
     if (
@@ -180,22 +152,79 @@ export function Pipeline() {
     ) {
       return;
     }
-    for (const item of items) {
-      const key = `lockedin-notified:${item.application_id}:${item.reminder_id || item.kind}:${item.due_at}`;
+    if (notifyInFlightRef.current) return;
+    notifyInFlightRef.current = true;
+    try {
+      const cutoff = Date.now() - 14 * 86_400_000;
+      const prefix = "lockedin-notified:";
       try {
-        if (window.localStorage.getItem(key)) continue;
-        window.localStorage.setItem(key, "1");
+        for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+          const key = window.localStorage.key(index);
+          if (!key?.startsWith(prefix)) continue;
+          const dueAt = Number(key.split(":").pop());
+          if (!Number.isFinite(dueAt) || dueAt < cutoff) window.localStorage.removeItem(key);
+        }
       } catch {
         // ignore storage failures
       }
-      const options = { body: item.body || item.role, tag: key, icon: "/icon.svg" };
-      if ("serviceWorker" in navigator) {
-        void navigator.serviceWorker.ready
-          .then((registration) => registration.showNotification(item.title, options))
-          .catch(() => new Notification(item.title, options));
+
+      const pending = items.filter((item) => {
+        const key = `${prefix}${item.application_id}:${item.reminder_id || item.kind}:${item.due_at}`;
+        try {
+          return !window.localStorage.getItem(key);
+        } catch {
+          return true;
+        }
+      });
+      if (pending.length === 0) return;
+
+      const show = async (title: string, options: NotificationOptions): Promise<boolean> => {
+        try {
+          if ("serviceWorker" in navigator) {
+            const registration = await navigator.serviceWorker.ready;
+            await registration.showNotification(title, options);
+          } else {
+            new Notification(title, options);
+          }
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
+      if (batch && pending.length > 1) {
+        const names = pending
+          .slice(0, 3)
+          .map((item) => item.company || item.role)
+          .join(", ");
+        const shown = await show(`${pending.length} deadlines need attention`, {
+          body: `${names}${pending.length > 3 ? ` and ${pending.length - 3} more` : ""}`,
+          tag: "lockedin-batch",
+          icon: "/icon.svg",
+        });
+        if (!shown) return;
       } else {
-        new Notification(item.title, options);
+        for (const item of pending) {
+          const key = `${prefix}${item.application_id}:${item.reminder_id || item.kind}:${item.due_at}`;
+          const shown = await show(item.title, {
+            body: item.body || item.role,
+            tag: key,
+            icon: "/icon.svg",
+          });
+          if (!shown) return;
+        }
       }
+
+      try {
+        for (const item of pending) {
+          const key = `${prefix}${item.application_id}:${item.reminder_id || item.kind}:${item.due_at}`;
+          window.localStorage.setItem(key, "1");
+        }
+      } catch {
+        // ignore storage failures
+      }
+    } finally {
+      notifyInFlightRef.current = false;
     }
   }, []);
 
@@ -208,7 +237,10 @@ export function Pipeline() {
     setApplications(appsResponse.applications || []);
     setStats(statsResponse);
     setFeed(feedResponse);
-    maybeNotify(feedResponse.due || []);
+    setConnectionError("");
+    const batch = firstFeedRef.current;
+    firstFeedRef.current = false;
+    void maybeNotify(feedResponse.due || [], batch);
   }, [maybeNotify]);
 
   useEffect(() => {
@@ -231,7 +263,9 @@ export function Pipeline() {
         if (appId) setDetailId(appId);
         if (params.get("settings") === "1") setSettingsOpen(true);
       } catch (error) {
-        notify(error instanceof Error ? error.message : "Could not reach the server.", "error");
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : "Could not reach the server.");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -243,15 +277,29 @@ export function Pipeline() {
 
   useEffect(() => {
     if (!status?.authenticated) return;
-    const timer = setInterval(() => {
+    const poll = () => {
+      if (document.hidden) return;
       api<Feed>("/api/notifications")
         .then((payload) => {
           setFeed(payload);
-          maybeNotify(payload.due || []);
+          setConnectionError("");
+          void maybeNotify(payload.due || []);
         })
-        .catch(() => undefined);
-    }, 60_000);
-    return () => clearInterval(timer);
+        .catch((error) => {
+          setConnectionError(
+            error instanceof Error ? error.message : "Could not reach the server. Retrying…",
+          );
+        });
+    };
+    const timer = setInterval(poll, 60_000);
+    const onVisible = () => {
+      if (!document.hidden) poll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [status?.authenticated, maybeNotify]);
 
   useEffect(() => {
@@ -262,17 +310,152 @@ export function Pipeline() {
   }, []);
 
   async function handleSaved() {
+    const [, statusPayload, settingsPayload] = await Promise.all([
+      refresh().catch(() => null),
+      api<StatusPayload>("/api/status").catch(() => null),
+      api<SettingsPayload>("/api/settings").catch(() => null),
+    ]);
+    if (statusPayload) setStatus(statusPayload);
+    if (settingsPayload) setSettings(settingsPayload);
+  }
+
+  async function restoreApplication(before: Application) {
+    setApplications((current) =>
+      current.map((app) => (app.id === before.id ? before : app)),
+    );
     try {
-      await refresh();
-    } catch {
-      // best-effort
+      const updated = await api<Application>(`/api/applications/${before.id}`, {
+        method: "PATCH",
+        body: {
+          stage: before.stage,
+          status: before.status,
+          action_state: before.action_state,
+          next_action: before.next_action,
+          next_action_at: before.next_action_at,
+          check_back_at: before.check_back_at,
+          check_back_source: before.check_back_source,
+          applied_at: before.applied_at,
+        },
+      });
+      setApplications((current) =>
+        current.map((app) => (app.id === before.id ? updated : app)),
+      );
+      notify("Move undone");
+      void handleSaved();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not undo the move.", "error");
+      void handleSaved();
     }
+  }
+
+  async function restoreTrash(trashId: string) {
     try {
-      setStatus(await api<StatusPayload>("/api/status"));
-      setSettings(await api<SettingsPayload>("/api/settings"));
-    } catch {
-      // best-effort
+      const result = await api<{ kind: "application" | "email" }>(
+        `/api/trash/${trashId}/restore`,
+        { method: "POST" },
+      );
+      notify(result.kind === "application" ? "Application restored" : "Email restored", "success");
+      setDetailRefresh((version) => version + 1);
+      await handleSaved();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not restore the item.", "error");
     }
+  }
+
+  function handleDeleted(application: Application, trashId: string) {
+    notifyUndo(`${application.company || "Application"} deleted`, () => {
+      void restoreTrash(trashId);
+    });
+  }
+
+  function handleEmailDeleted(_email: unknown, trashId: string) {
+    notifyUndo("Email deleted", () => {
+      void restoreTrash(trashId);
+    });
+  }
+
+  async function snoozeApplication(app: Application, days: number) {
+    try {
+      const updated = await api<Application>(`/api/applications/${app.id}/snooze`, {
+        method: "POST",
+        body: { days },
+      });
+      setApplications((current) =>
+        current.map((row) => (row.id === updated.id ? updated : row)),
+      );
+      notify(`Snoozed ${app.company || "application"} ${days} day${days === 1 ? "" : "s"}`);
+      void handleSaved();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not snooze the application.", "error");
+    }
+  }
+
+  async function markFollowedUp(app: Application) {
+    try {
+      const updated = await api<Application>(`/api/applications/${app.id}/outcome`, {
+        method: "POST",
+        body: { outcome: "follow_up" },
+      });
+      setApplications((current) =>
+        current.map((row) => (row.id === updated.id ? updated : row)),
+      );
+      notify(`Follow-up logged for ${app.company || "application"}`);
+      void handleSaved();
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "Could not log the follow-up.",
+        "error",
+      );
+    }
+  }
+
+  async function moveApplication(appId: string, stage: Stage) {
+    const current = applications.find((app) => app.id === appId);
+    if (!current || current.stage === stage) return;
+    const before = { ...current };
+    const terminal = TERMINAL_STAGES.has(stage);
+    setApplications((apps) =>
+      apps.map((app) =>
+        app.id === appId
+          ? {
+              ...app,
+              stage,
+              status: terminal ? "closed" : app.status,
+              check_back_at: terminal ? null : app.check_back_at,
+              next_action_at: terminal ? null : app.next_action_at,
+            }
+          : app,
+      ),
+    );
+    setDragId(null);
+    setDragOverStage(null);
+    try {
+      const updated = await api<Application>(`/api/applications/${appId}`, {
+        method: "PATCH",
+        body: { stage },
+      });
+      setApplications((apps) => apps.map((app) => (app.id === appId ? updated : app)));
+      notifyUndo(`Moved to ${STAGE_LABELS[stage]}`, () => {
+        void restoreApplication(before);
+      });
+      void handleSaved();
+    } catch (error) {
+      setApplications((apps) => apps.map((app) => (app.id === appId ? before : app)));
+      notify(error instanceof Error ? error.message : "Could not move the application.", "error");
+    }
+  }
+
+  function moveByKeyboard(
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    app: Application,
+  ) {
+    if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+    const index = BOARD_STAGES.indexOf(app.stage);
+    if (index === -1) return;
+    const next = BOARD_STAGES[index + (event.key === "ArrowRight" ? 1 : -1)];
+    if (!next) return;
+    event.preventDefault();
+    void moveApplication(app.id, next);
   }
 
   function openAdd(stage?: Stage) {
@@ -302,18 +485,27 @@ export function Pipeline() {
     setParsing(true);
     setParseError("");
     try {
-      const result = await api<ParsedDraft>("/api/parse-email", {
-        method: "POST",
-        body: { raw_text: parserText, parser_mode: "llm" },
-      });
+      const segments = splitEmailThread(parserText);
+      const parsed: Array<{ draft: ParsedDraft; raw: string }> = [];
+      for (const segment of segments) {
+        const result = await api<ParsedDraft>("/api/parse-email", {
+          method: "POST",
+          body: { raw_text: segment, parser_mode: parseMode },
+        });
+        parsed.push({ draft: result, raw: segment });
+      }
+      const first = parsed[0];
       setParserInputOpen(false);
-      setDraft(result);
+      setDraft(first.draft);
+      setDraftRaw(first.raw);
+      setDraftQueue(parsed.slice(1));
+      setDraftIndex(0);
       setParserOpen(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not parse the email.";
       setParseError(message);
       notify(message, "error");
-      if (/ai provider/i.test(message)) {
+      if (error instanceof ApiClientError && error.code === "LLM_NOT_CONFIGURED") {
         setParserInputOpen(false);
         requestAiSetup();
       }
@@ -322,38 +514,88 @@ export function Pipeline() {
     }
   }
 
-  async function confirmDraft() {
+  async function confirmDraft(mode: "update" | "create") {
     if (!draft) return;
     setSavingDraft(true);
+    const raw = draftRaw || parserText;
+    const updateId =
+      mode === "update" ? draft.matched_application?.id || null : null;
     try {
-      const created = await api<Application>("/api/applications", {
-        method: "POST",
-        body: {
-          company: draft.company,
-          role: draft.role,
-          location: draft.location,
-          source: "Parsed email",
-          stage: draft.stage,
-          applied_at: draft.applied_at ?? draft.received_at,
-          check_back_at: draft.check_back_at,
-          check_back_source: draft.check_back_source,
-          next_action: draft.next_action,
-          next_action_at: draft.next_action_at,
-        },
-      });
-      await api(`/api/applications/${created.id}/emails`, {
-        method: "POST",
-        body: {
-          raw_text: parserText,
-          subject: draft.subject,
-          from_email: draft.from_email,
-          apply: false,
-        },
-      }).catch(() => undefined);
+      const payload = {
+        company: draft.company,
+        role: draft.role,
+        location: draft.location,
+        stage: draft.stage,
+        applied_at: draft.stage === "saved" ? null : draft.applied_at ?? draft.received_at,
+        apply_by: draft.apply_by,
+        check_back_at: draft.check_back_at,
+        check_back_source: draft.check_back_source,
+        next_action: draft.next_action,
+        next_action_at: draft.next_action_at,
+        notes: draft.evidence.length ? `Parsed evidence: ${draft.evidence.join(" · ")}` : "",
+      };
+      const target = updateId
+        ? await api<Application>(`/api/applications/${updateId}`, {
+            method: "PATCH",
+            body: {
+              company: payload.company,
+              role: payload.role,
+              location: payload.location,
+              stage: payload.stage,
+              apply_by: payload.apply_by,
+              check_back_at: payload.check_back_at,
+              check_back_source: payload.check_back_source,
+              next_action: payload.next_action,
+              next_action_at: payload.next_action_at,
+            },
+          })
+        : await api<Application>("/api/applications", {
+            method: "POST",
+            body: { ...payload, source: "Parsed email" },
+          });
+      let emailAttached = true;
+      try {
+        await api(`/api/applications/${target.id}/emails`, {
+          method: "POST",
+          body: {
+            raw_text: raw,
+            subject: draft.subject,
+            from_email: draft.from_email,
+            apply: false,
+          },
+        });
+      } catch {
+        emailAttached = false;
+      }
+      const remaining = draftQueue;
+      if (remaining.length > 0) {
+        const next = remaining[0];
+        setDraft(next.draft);
+        setDraftRaw(next.raw);
+        setDraftQueue(remaining.slice(1));
+        setDraftIndex((index) => index + 1);
+        notify(
+          emailAttached
+            ? `${updateId ? "Updated" : "Added"} ${draft.company} · ${remaining.length} left`
+            : "Added, but the email could not be attached to the timeline.",
+          emailAttached ? "success" : "error",
+        );
+        await handleSaved();
+        return;
+      }
       setParserOpen(false);
       setParserText("");
       setDraft(null);
-      notify("Parsed email added to the pipeline", "success");
+      setDraftRaw("");
+      setDraftIndex(0);
+      notify(
+        !emailAttached
+          ? "Draft added, but the email could not be attached to the timeline."
+          : updateId
+            ? `Updated ${target.company} from the parsed email`
+            : "Parsed email added to the pipeline",
+        emailAttached ? "success" : "error",
+      );
       await handleSaved();
     } catch (error) {
       notify(error instanceof Error ? error.message : "Could not add the draft.", "error");
@@ -391,7 +633,17 @@ export function Pipeline() {
     () =>
       applications.filter((app) => {
         if (!query) return true;
-        return `${app.company} ${app.role} ${app.location} ${app.next_action}`
+        return [
+          app.company,
+          app.role,
+          app.location,
+          app.source,
+          app.next_action,
+          app.notes,
+          app.job_url,
+          STAGE_LABELS[app.stage],
+        ]
+          .join(" ")
           .toLowerCase()
           .includes(query);
       }),
@@ -402,11 +654,17 @@ export function Pipeline() {
     const grouped: Record<string, Application[]> = {};
     for (const stage of BOARD_STAGES) grouped[stage] = [];
     for (const app of filtered) {
-      if (grouped[app.stage]) grouped[app.stage].push(app);
+      const stage = grouped[app.stage] ? app.stage : "applied";
+      grouped[stage].push(app);
     }
+    for (const stage of BOARD_STAGES) grouped[stage].sort(compareUrgency);
     return grouped;
   }, [filtered]);
 
+  const agenda = useMemo(
+    () => agendaBuckets(applications, feed.now || Date.now()),
+    [applications, feed.now],
+  );
   const closed = useMemo(() => applications.filter((app) => app.status === "closed"), [applications]);
   const cadenceItems = useMemo(() => {
     const map = new Map<string, NotificationItem>();
@@ -427,7 +685,32 @@ export function Pipeline() {
     );
   }
 
-  if (!status?.authenticated) {
+  if (!status) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-base px-4">
+        <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 text-center">
+          <p className="font-display text-lg font-bold text-cream">Could not load your pipeline</p>
+          <p className="mt-2 text-xs leading-relaxed text-cream-muted">
+            {loadError || "The server did not respond."}
+          </p>
+          <div className="mt-5 flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="rounded-lg border border-cyan/40 bg-cyan/10 px-4 py-2 text-xs font-semibold text-cyan hover:bg-cyan/20"
+            >
+              Retry
+            </button>
+            <a href="/" className="rounded-lg border border-border px-4 py-2 text-xs font-semibold text-cream-muted hover:text-cream">
+              Back to sign in
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!status.authenticated) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-base">
         <p className="text-sm text-cream-muted">Redirecting to sign in…</p>
@@ -509,6 +792,18 @@ export function Pipeline() {
       </header>
 
       <main className="mx-auto min-h-screen w-full max-w-[1920px] px-4 pb-10 pt-24 sm:px-6 lg:px-12">
+        {connectionError && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            <span>{connectionError}</span>
+            <button
+              type="button"
+              onClick={() => void refresh().catch(() => undefined)}
+              className="shrink-0 font-semibold text-amber-100 hover:text-white"
+            >
+              Retry now
+            </button>
+          </div>
+        )}
         <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-center">
           <div className="flex flex-wrap items-center gap-3 sm:gap-4">
             <div className="relative w-full sm:w-80">
@@ -551,6 +846,7 @@ export function Pipeline() {
           </div>
 
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-cream-muted">
+            <SummaryDot stage="saved" label="Saved" value={stats.by_stage?.saved || 0} suffix="roles" />
             <SummaryDot stage="applied" label="Applied" value={stats.by_stage?.applied || 0} suffix="roles" />
             <SummaryDot stage="assessment" label="Assessment" value={stats.by_stage?.assessment || 0} suffix="pending" />
             <SummaryDot stage="interview" label="Interviews" value={stats.by_stage?.interview || 0} suffix="active" />
@@ -597,16 +893,48 @@ export function Pipeline() {
 
         {mode === "board" ? (
           <>
-            <div className="grid grid-cols-1 items-start gap-5 sm:grid-cols-2 xl:grid-cols-4">
+            <TodayAgenda
+              buckets={agenda}
+              onOpen={setDetailId}
+              onSnooze={(app, days) => void snoozeApplication(app, days)}
+              onFollowedUp={(app) => void markFollowedUp(app)}
+            />
+            <div className="grid grid-cols-1 items-start gap-5 sm:grid-cols-2 xl:grid-cols-5">
               {BOARD_STAGES.map((stage) => {
-                const meta = COLUMN_META[stage];
+                const meta = columnMeta(stage);
                 const items = byStage[stage] || [];
                 const isExpanded = Boolean(expanded[stage]);
-                const visible = isExpanded ? items : items.slice(0, 3);
+                const urgentCount = items.filter(isOverdue).length;
+                const visible = isExpanded
+                  ? items
+                  : items.slice(0, Math.max(3, urgentCount));
                 return (
                   <section
                     key={stage}
-                    className="flex flex-col gap-3.5 rounded-2xl border border-border/40 bg-surface/30 p-4"
+                    data-stage={stage}
+                    onDragOver={(event) => {
+                      if (!dragId) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      setDragOverStage(stage);
+                    }}
+                    onDragLeave={(event) => {
+                      const next = event.relatedTarget as Node | null;
+                      if (next && event.currentTarget.contains(next)) return;
+                      setDragOverStage((current) => (current === stage ? null : current));
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const id = event.dataTransfer.getData("text/plain") || dragId;
+                      setDragId(null);
+                      setDragOverStage(null);
+                      if (id) void moveApplication(id, stage);
+                    }}
+                    className={`flex flex-col gap-3.5 rounded-2xl border bg-surface/30 p-4 transition-colors ${
+                      dragOverStage === stage
+                        ? "border-cyan/60 bg-cyan/5"
+                        : "border-border/40"
+                    }`}
                   >
                     <div className="flex items-center justify-between border-b border-border/40 px-1 pb-2">
                       <div className="flex items-center gap-2.5">
@@ -644,18 +972,29 @@ export function Pipeline() {
                             key={app.id}
                             app={app}
                             meta={meta}
+                            dragging={dragId === app.id}
                             onOpen={() => setDetailId(app.id)}
+                            onDragStart={(event) => {
+                              event.dataTransfer.setData("text/plain", app.id);
+                              event.dataTransfer.effectAllowed = "move";
+                              setDragId(app.id);
+                            }}
+                            onDragEnd={() => {
+                              setDragId(null);
+                              setDragOverStage(null);
+                            }}
+                            onKeyDown={(event) => moveByKeyboard(event, app)}
                           />
                         ))
                       )}
                     </div>
 
-                    {items.length > 3 && (
+                    {(items.length > visible.length || (isExpanded && items.length > 3)) && (
                       <button
                         onClick={() => setExpanded((current) => ({ ...current, [stage]: !isExpanded }))}
                         className="cursor-pointer py-1.5 text-center text-xs text-cream-muted/70 transition-colors hover:text-cream-muted"
                       >
-                        {isExpanded ? "Show less" : `+${items.length - 3} more in ${STAGE_LABELS[stage].toLowerCase()}`}
+                        {isExpanded ? "Show less" : `+${items.length - visible.length} more in ${STAGE_LABELS[stage].toLowerCase()}`}
                       </button>
                     )}
                   </section>
@@ -696,7 +1035,7 @@ export function Pipeline() {
 
       <button
         onClick={() => setCadenceOpen(true)}
-        className="group fixed bottom-8 right-8 z-40 flex h-14 w-14 items-center justify-center rounded-full border border-cyan/50 bg-gradient-to-r from-steel to-steel-dim text-cyan shadow-xl transition-all hover:scale-105 hover:border-cyan"
+        className="group fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full border border-cyan/50 bg-gradient-to-r from-steel to-steel-dim text-cyan shadow-xl transition-all hover:scale-105 hover:border-cyan sm:bottom-8 sm:right-8"
         title="Upcoming cadence"
       >
         <Icon name="calendar_today" className="text-[22px] text-cyan transition-all group-hover:brightness-110" />
@@ -730,6 +1069,8 @@ export function Pipeline() {
         parsing={parsing}
         error={parseError}
         aiReady={Boolean(settings?.preferences?.llm_api_key_set)}
+        mode={parseMode}
+        onModeChange={(value) => setParseMode(value)}
         onClose={() => {
           setParserInputOpen(false);
           setParseError("");
@@ -740,11 +1081,19 @@ export function Pipeline() {
       <ParserPreview
         open={parserOpen}
         draft={draft}
-        raw={parserText}
+        raw={draftRaw || parserText}
         saving={savingDraft}
-        onClose={() => setParserOpen(false)}
+        position={draftIndex}
+        total={draftIndex + draftQueue.length + 1}
+        onClose={() => {
+          setParserOpen(false);
+          setDraftQueue([]);
+          setDraftRaw("");
+          setDraftIndex(0);
+        }}
         onEdit={editDraft}
-        onConfirm={confirmDraft}
+        onChange={(patch) => setDraft((current) => (current ? { ...current, ...patch } : current))}
+        onConfirm={(mode) => void confirmDraft(mode)}
       />
 
       <SettingsModal
@@ -766,6 +1115,7 @@ export function Pipeline() {
         application={editing}
         initialStage={initialStage}
         initialDraft={initialDraft}
+        defaultFollowUpDays={settings?.preferences?.default_follow_up_days || 7}
         onClose={() => {
           setAppModalOpen(false);
           setEditing(null);
@@ -773,12 +1123,15 @@ export function Pipeline() {
           setInitialDraft(null);
         }}
         onSaved={handleSaved}
+        onDeleted={handleDeleted}
         notify={notify}
       />
       <DetailModal
         applicationId={detailId}
+        refreshToken={detailRefresh}
         onClose={() => setDetailId(null)}
         onChanged={handleSaved}
+        onEmailDeleted={handleEmailDeleted}
         onEdit={(app) => {
           setDetailId(null);
           setEditing(app);
@@ -789,517 +1142,6 @@ export function Pipeline() {
         notify={notify}
       />
       {toast && <Toast {...toast} />}
-    </div>
-  );
-}
-
-function SummaryDot({
-  stage,
-  label,
-  value,
-  suffix,
-}: {
-  stage: Stage;
-  label: string;
-  value: number;
-  suffix: string;
-}) {
-  const meta = COLUMN_META[stage];
-  return (
-    <div className="flex items-center gap-2">
-      <span className={`h-2 w-2 rounded-full ${meta.dot} ${meta.glow}`} />
-      <span>
-        {label}: <strong className={`font-semibold ${meta.text}`}>{value} {suffix}</strong>
-      </span>
-    </div>
-  );
-}
-
-function BoardCard({
-  app,
-  meta,
-  onOpen,
-}: {
-  app: Application;
-  meta: (typeof COLUMN_META)[Stage];
-  onOpen: () => void;
-}) {
-  const now = Date.now();
-  const checkDue = Boolean(app.check_back_at && app.check_back_at <= now);
-  const actionDue = Boolean(app.next_action_at && app.next_action_at <= now);
-  const urgent = checkDue || actionDue;
-
-  return (
-    <button
-      onClick={onOpen}
-      className={`group flex w-full cursor-pointer flex-col gap-2.5 rounded-xl border bg-surface p-4 text-left shadow-sm transition-all hover:bg-surface-raised/60 ${
-        urgent ? "border-[#EF4444]/45 hover:border-[#EF4444]" : `${meta.border} ${meta.hover}`
-      }`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h4 className="truncate font-display text-sm font-semibold text-cream transition-colors group-hover:text-cyan">
-            {app.company || "Untitled"}
-          </h4>
-          <p className="mt-0.5 truncate text-xs text-cream-muted">{app.role || "—"}</p>
-        </div>
-        <CompanyAvatar company={app.company} stage={app.stage} />
-      </div>
-
-      {app.stage !== "applied" && app.next_action && (
-        <div
-          className={`flex flex-col gap-1 rounded-lg border p-2.5 text-xs ${meta.border}`}
-          style={{ background: "linear-gradient(135deg, rgba(118,192,236,0.08) 0%, rgba(27,36,59,0.9) 100%)" }}
-        >
-          <span className={`font-medium ${meta.text}`}>{app.next_action}</span>
-          <span className="text-cream-muted">
-            {app.next_action_at ? fmtDate(app.next_action_at) : "No deadline"} · {app.location || "—"}
-          </span>
-        </div>
-      )}
-
-      <div className="flex items-center justify-between gap-2 border-t border-border/40 pt-2 text-xs">
-        {actionDue ? (
-          <span className="flex items-center gap-1.5 rounded-md border border-[#EF4444]/40 bg-[#EF4444]/15 px-2 py-0.5 text-[10px] font-semibold text-[#FF95A5]">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#EF4444] shadow-[0_0_6px_#EF4444]" />
-            Due {relative(app.next_action_at)}
-          </span>
-        ) : app.check_back_at ? (
-          <span
-            className={`flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-medium ${
-              checkDue
-                ? "border-[#EF4444]/40 bg-[#EF4444]/15 text-[#FF95A5]"
-                : "border-[#F59E0B]/30 bg-[#F59E0B]/15 text-[#FCD34D]"
-            }`}
-          >
-            <Icon name="schedule" className="text-[12px]" />
-            {checkDue ? "Check back due" : `${relative(app.check_back_at)} check-back`}
-          </span>
-        ) : (
-          <span className="text-cream-muted/70">No cadence</span>
-        )}
-        <span className="shrink-0 text-cream-muted">
-          {app.stage === "applied" ? `Applied ${daysAgo(app.applied_at)}` : app.source || "—"}
-        </span>
-      </div>
-    </button>
-  );
-}
-
-function ListView({
-  applications,
-  onOpen,
-  onAdd,
-  onShowBoard,
-}: {
-  applications: Application[];
-  onOpen: (id: string) => void;
-  onAdd: () => void;
-  onShowBoard: () => void;
-}) {
-  return (
-    <section className="overflow-hidden rounded-2xl border border-border/60 bg-surface/60">
-      <div className="flex items-center justify-between border-b border-border/50 px-4 py-3">
-        <h2 className="font-display text-sm font-semibold text-cream">
-          All applications <span className="ml-1 text-xs font-normal text-cream-muted">({applications.length})</span>
-        </h2>
-        <div className="flex items-center gap-2">
-          <button onClick={onAdd} className="rounded-lg border border-border px-3 py-1.5 text-[10px] font-semibold text-cream-muted hover:border-cyan/50 hover:text-cream">
-            Add
-          </button>
-          <button onClick={onShowBoard} className="rounded-lg border border-border px-3 py-1.5 text-[10px] font-semibold text-cream-muted hover:border-cyan/50 hover:text-cream">
-            Board view
-          </button>
-        </div>
-      </div>
-      <div className="hidden grid-cols-[minmax(0,1.5fr)_120px_120px_140px_32px] gap-3 border-b border-border/40 px-4 py-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-cream-muted/70 md:grid">
-        <span>Company / role</span>
-        <span>Stage</span>
-        <span>Check back</span>
-        <span>Next action</span>
-        <span />
-      </div>
-      {applications.length === 0 ? (
-        <EmptyState message="No applications match your search." icon="search_off" />
-      ) : (
-        applications.map((app) => {
-          const overdue = Boolean(app.check_back_at && app.check_back_at <= Date.now() && app.status === "active");
-          return (
-            <button
-              key={app.id}
-              onClick={() => onOpen(app.id)}
-              className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/30 px-4 py-3 text-left transition last:border-0 hover:bg-surface-raised/50 md:grid-cols-[minmax(0,1.5fr)_120px_120px_140px_32px]"
-            >
-              <div className="flex min-w-0 items-center gap-2.5">
-                <CompanyAvatar company={app.company} stage={app.stage} />
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-semibold text-cream">{app.company || "Untitled"}</p>
-                  <p className="truncate text-[10px] text-cream-muted">
-                    {app.role || "—"}
-                    {app.location ? ` · ${app.location}` : ""}
-                  </p>
-                </div>
-              </div>
-              <StageBadge stage={app.stage} />
-              <span className={`hidden text-[10px] md:block ${overdue ? "font-semibold text-signal-warning" : "text-cream-muted"}`}>
-                {app.check_back_at ? fmtDate(app.check_back_at) : "—"}
-              </span>
-              <span className="hidden truncate text-[10px] text-cream-muted md:block">
-                {app.next_action || "—"}
-              </span>
-              <Icon name="chevron_right" className="hidden text-[15px] text-cream-muted md:block" />
-            </button>
-          );
-        })
-      )}
-    </section>
-  );
-}
-
-function ParserInputModal({
-  open,
-  value,
-  onChange,
-  parsing,
-  error,
-  aiReady,
-  onClose,
-  onSubmit,
-}: {
-  open: boolean;
-  value: string;
-  onChange: (value: string) => void;
-  parsing: boolean;
-  error: string;
-  aiReady: boolean;
-  onClose: () => void;
-  onSubmit: () => void;
-}) {
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      className="max-w-2xl overflow-hidden rounded-2xl border border-border bg-[#0c101b] shadow-2xl"
-    >
-      <div className="flex max-h-[92vh] flex-col">
-        <div className="flex items-start justify-between border-b border-border/60 px-6 py-5">
-          <div>
-            <div className="flex items-center gap-2">
-              <Icon name="auto_awesome" className="text-[16px] text-cyan" />
-              <h2 className="font-display text-lg font-bold tracking-tight text-cream">
-                Paste recruiter email
-              </h2>
-            </div>
-            <p className="mt-1 text-xs text-cream-muted">
-              Paste the full email body. The AI provider extracts the role, stage, and deadlines.
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="-mr-1 rounded-lg p-1 text-cream-muted transition hover:bg-white/5 hover:text-cream"
-          >
-            <Icon name="close" className="text-[17px]" />
-          </button>
-        </div>
-
-        <div className="px-6 py-4">
-          <textarea
-            autoFocus
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            placeholder="Paste the entire recruiter email here, including the greeting and signature…"
-            className="min-h-[46vh] w-full resize-y rounded-xl border border-border bg-[#070b13] px-4 py-3 font-mono text-[11.5px] leading-relaxed text-cream/90 placeholder:text-cream-muted/40 focus:border-cyan focus:outline-none"
-          />
-        </div>
-
-        {(error || !aiReady) && (
-          <div className="mx-6 mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-200">
-            {error || "No AI provider connected yet. Add an API key in Settings before parsing."}
-          </div>
-        )}
-
-        <div className="flex items-center justify-between border-t border-border/60 bg-[#090d16] px-6 py-4">
-          <span className="text-[10px] text-cream-muted">
-            {value.trim().length.toLocaleString()} characters
-          </span>
-          <div className="flex items-center gap-2.5">
-            <button
-              onClick={onClose}
-              className="px-1 text-xs font-medium text-cream-muted transition hover:text-cream"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={onSubmit}
-              disabled={parsing || !value.trim()}
-              className="flex items-center gap-1.5 rounded-lg bg-cyan px-4 py-2 text-xs font-semibold text-[#07131b] shadow-sm transition-all hover:bg-cyan/90 disabled:opacity-60"
-            >
-              {parsing ? (
-                <SpinnerLabel label="Parsing" />
-              ) : (
-                <>
-                  <Icon name="bolt" className="text-[13px]" />
-                  <span>Parse &amp; Draft</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-function ParserPreview({
-  open,
-  draft,
-  raw,
-  saving,
-  onClose,
-  onEdit,
-  onConfirm,
-}: {
-  open: boolean;
-  draft: ParsedDraft | null;
-  raw: string;
-  saving: boolean;
-  onClose: () => void;
-  onEdit: () => void;
-  onConfirm: () => void;
-}) {
-  if (!open || !draft) return null;
-  const meta = COLUMN_META[draft.stage];
-  const excerpt = raw.trim().replace(/\s+/g, " ").slice(0, 180);
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-base/80 p-4 backdrop-blur-md"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div className="animate-rise-in flex w-full max-w-md flex-col gap-4 rounded-2xl border border-border/80 bg-surface p-6 text-left shadow-2xl">
-        <div className="flex items-center justify-between border-b border-border/40 pb-3">
-          <div className="flex items-center gap-2">
-            <Icon name="auto_awesome" className="text-[16px] text-cyan" />
-            <h3 className="font-display text-sm font-semibold tracking-wide text-cream">Smart Parser Draft</h3>
-            <span className="rounded-full border border-cyan/30 bg-cyan/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-cyan">
-              Preview ready
-            </span>
-          </div>
-          <button onClick={onClose} className="rounded-lg p-1 text-cream-muted/60 transition-colors hover:bg-surface-raised hover:text-cream">
-            <Icon name="close" className="text-[16px]" />
-          </button>
-        </div>
-
-        <div className="rounded-xl border border-cyan/10 bg-surface-container-lowest p-3 text-xs italic leading-relaxed text-cream/70">
-          “{excerpt}{raw.trim().length > 180 ? "…" : ""}”
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 text-xs">
-          <FieldBox label="Company" value={draft.company || "—"} />
-          <FieldBox label="Role" value={draft.role || "—"} />
-          <div className="rounded-lg border border-border/50 bg-surface-raised p-2.5">
-            <span className="mb-0.5 block text-[9px] font-medium text-cream-muted/60">Target stage</span>
-            <span className={`flex items-center gap-1 font-semibold ${meta.text}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
-              {STAGE_LABELS[draft.stage]}
-            </span>
-          </div>
-          <FieldBox
-            label="Auto cadence"
-            value={draft.check_back_at ? `${fmtDate(draft.check_back_at)} · ${relative(draft.check_back_at)}` : "No check-back"}
-            accent
-          />
-        </div>
-
-        <div className="flex items-center justify-between border-t border-border/40 pt-2 text-[9px] text-cream-muted/70">
-          <span className="capitalize">{draft.parser} parser · {Math.round(draft.confidence * 100)}% confidence</span>
-          {draft.evidence.length > 0 && <span className="truncate pl-3">{draft.evidence[0]}</span>}
-        </div>
-
-        <div className="flex items-center justify-end gap-2.5 border-t border-border/40 pt-2">
-          <button onClick={onEdit} className="rounded-lg px-3.5 py-1.5 text-xs font-medium text-cream-muted transition-colors hover:bg-surface-raised hover:text-cream">
-            Edit details
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={saving}
-            className="flex items-center gap-1.5 rounded-lg bg-cyan px-4 py-1.5 text-xs font-semibold text-on-primary-container shadow-md transition-all hover:bg-cyan/90 disabled:opacity-60"
-          >
-            {saving ? <SpinnerLabel label="Adding" /> : <><Icon name="check_circle" className="text-[12.5px]" /> Confirm &amp; Add</>}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function FieldBox({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
-  return (
-    <div className="rounded-lg border border-border/50 bg-surface-raised p-2.5">
-      <span className="mb-0.5 block text-[9px] font-medium text-cream-muted/60">{label}</span>
-      <span className={`block truncate font-semibold ${accent ? "text-cyan" : "text-cream"}`}>{value}</span>
-    </div>
-  );
-}
-
-function CadenceDrawer({
-  open,
-  items,
-  due,
-  permission,
-  onEnable,
-  onClose,
-  onOpen,
-}: {
-  open: boolean;
-  items: NotificationItem[];
-  due: NotificationItem[];
-  permission: string;
-  onEnable: () => void;
-  onClose: () => void;
-  onOpen: (id: string) => void;
-}) {
-  if (!open) return null;
-
-  const now = new Date();
-  const mondayOffset = (now.getDay() + 6) % 7;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - mondayOffset);
-  const week = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(monday);
-    date.setDate(monday.getDate() + index);
-    return date;
-  });
-  const eventDays = new Set(items.map((item) => dateKey(item.due_at)));
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-end bg-base/70 backdrop-blur-sm sm:items-center"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div className="animate-slide-in-right flex h-full max-h-[92vh] w-full flex-col gap-5 overflow-y-auto border-l border-border/80 bg-surface p-6 shadow-2xl sm:max-h-screen sm:w-[420px] sm:rounded-l-2xl">
-        <div className="flex items-center justify-between border-b border-border/40 pb-3">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-steel/50 bg-steel/30 text-cyan">
-              <Icon name="event_upcoming" className="text-[16px]" />
-            </div>
-            <div>
-              <h3 className="font-display text-base font-semibold text-cream">Upcoming Cadence</h3>
-              <p className="text-xs text-cream-muted">
-                {items.length} deadline{items.length === 1 ? "" : "s"} &amp; events
-              </p>
-            </div>
-          </div>
-          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg bg-surface-raised text-cream-muted transition-colors hover:border hover:border-steel hover:text-cream">
-            <Icon name="close" className="text-[16px]" />
-          </button>
-        </div>
-
-        <div className="rounded-xl border border-border/50 bg-surface-raised/60 p-2 text-center text-xs">
-          <div className="grid grid-cols-7 gap-1">
-            {["M", "T", "W", "T", "F", "S", "S"].map((day, index) => (
-              <div key={`${day}-${index}`} className="p-1 text-[9px] text-cream-muted/70">{day}</div>
-            ))}
-            {week.map((date) => {
-              const isToday = date.toDateString() === now.toDateString();
-              const hasEvent = eventDays.has(dateKey(date.getTime()));
-              return (
-                <div
-                  key={date.toISOString()}
-                  className={`rounded-lg py-1.5 ${
-                    isToday
-                      ? "border border-cyan/50 bg-cyan/15 font-bold text-cyan"
-                      : hasEvent
-                        ? "border border-signal-warning/40 bg-signal-warning/15 font-bold text-[#FCD34D]"
-                        : "text-cream-muted"
-                  }`}
-                >
-                  {date.getDate()}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="flex flex-1 flex-col gap-3">
-          {items.length === 0 ? (
-            <EmptyState message="Nothing due in the next 48 hours." icon="event_available" />
-          ) : (
-            items.map((item) => {
-              const isDue = due.some(
-                (entry) =>
-                  entry.application_id === item.application_id &&
-                  entry.due_at === item.due_at &&
-                  entry.kind === item.kind,
-              );
-              const meta = COLUMN_META[item.stage];
-              const border = isDue ? "border-[#EF4444]/35 hover:border-[#EF4444]" : `${meta.border} ${meta.hover}`;
-              const chip = isDue
-                ? "text-[#FF95A5] bg-[#EF4444]/20 border-[#EF4444]/40"
-                : "text-[#FCD34D] bg-[#F59E0B]/16 border-[#F59E0B]/35";
-              return (
-                <button
-                  key={`${item.application_id}:${item.reminder_id || item.kind}:${item.due_at}`}
-                  onClick={() => onOpen(item.application_id)}
-                  className={`group flex items-center justify-between gap-3 rounded-xl border bg-surface-raised/80 p-3.5 text-left shadow-sm transition-all ${border}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${isDue ? "bg-[#EF4444] shadow-[0_0_8px_rgba(239,68,68,0.7)]" : `${meta.dot} ${meta.glow}`}`} />
-                    <div>
-                      <p className="text-xs font-semibold text-cream transition-colors group-hover:text-cyan">
-                        {item.company}
-                      </p>
-                      <p className="mt-0.5 text-[10px] text-cream-muted">
-                        {fmtDate(item.due_at)} · {item.title || item.role}
-                      </p>
-                    </div>
-                  </div>
-                  <span className={`shrink-0 rounded-md border px-2.5 py-1 text-[10px] font-semibold ${chip}`}>
-                    {relative(item.due_at)}
-                  </span>
-                </button>
-              );
-            })
-          )}
-        </div>
-
-        <div className="flex flex-col gap-2 border-t border-border/40 pt-3">
-          <button
-            onClick={onEnable}
-            disabled={permission === "granted"}
-            className="w-full rounded-xl border border-border bg-surface-raised py-2.5 text-xs font-medium text-cream transition-all hover:border-cyan/50 disabled:opacity-50"
-          >
-            {permission === "granted" ? "Browser notifications enabled" : "Enable browser notifications"}
-          </button>
-          <button
-            onClick={onClose}
-            className="w-full rounded-xl border border-border bg-surface-raised py-2.5 text-xs font-medium text-cream transition-all hover:border-steel"
-          >
-            Close drawer
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Toast({ message, tone }: { message: string; tone: "success" | "error" }) {
-  return (
-    <div className="pointer-events-none fixed bottom-4 left-1/2 z-[70] -translate-x-1/2">
-      <div
-        className={`flex items-center gap-2 rounded-xl border px-3.5 py-2 text-xs font-medium shadow-2xl backdrop-blur-xl ${
-          tone === "success"
-            ? "border-cyan/30 bg-surface/95 text-cream"
-            : "border-error/30 bg-error-container/80 text-white"
-        }`}
-      >
-        <Icon name={tone === "success" ? "check_circle" : "error"} className={`text-[14px] ${tone === "success" ? "text-cyan" : "text-white"}`} />
-        {message}
-      </div>
     </div>
   );
 }

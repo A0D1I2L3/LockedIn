@@ -8,6 +8,40 @@ export function isoNow(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
+const TIMEZONE_ALIASES: Record<string, string> = {
+  IST: "Asia/Kolkata",
+  PST: "America/Los_Angeles",
+  PDT: "America/Los_Angeles",
+  MST: "America/Denver",
+  MDT: "America/Denver",
+  CST: "America/Chicago",
+  CDT: "America/Chicago",
+  EST: "America/New_York",
+  EDT: "America/New_York",
+};
+
+export function isValidTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function isKnownTimezone(value: string): boolean {
+  const raw = value.trim();
+  return Boolean(TIMEZONE_ALIASES[raw.toUpperCase()]) || isValidTimezone(raw);
+}
+
+export function normalizeTimezone(value: string | null | undefined): string {
+  const raw = (value || "").trim();
+  if (!raw) return "UTC";
+  const alias = TIMEZONE_ALIASES[raw.toUpperCase()];
+  if (alias) return alias;
+  return isValidTimezone(raw) ? raw : "UTC";
+}
+
 const formatterCache = new Map<string, Intl.DateTimeFormat>();
 
 function formatterFor(timezone: string): Intl.DateTimeFormat {
